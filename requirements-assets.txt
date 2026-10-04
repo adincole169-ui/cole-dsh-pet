@@ -1,0 +1,21 @@
+# 「从源码跑」时才需要的依赖
+#
+# 桌宠**运行**只需要 PyQt5（见 requirements.txt）。
+# 但如果你是从源码 clone 下来的，还需要先把 webm 解码成 PNG 帧 —— 那要 ffmpeg。
+#
+# 有两条路拿到 ffmpeg：
+#   1. 自己装一个（推荐，用较新的版本）：https://ffmpeg.org/download.html
+#      装好后确认 `ffmpeg -version` 在 PATH 里能跑；
+#   2. 装下面这个包 —— 它会带一个 ffmpeg 二进制进来（约 62 MB），免手动安装。
+#
+#     python -m pip install -r requirements-assets.txt
+#
+# 装完跑一键准备：
+#     python tools/setup_assets.py
+#
+# 说明：下面这个包自带的是 ffmpeg 4.2.2（2019 年）。实测它在本项目的
+# `frames/<中文名>/` 目录下**直接写文件会失败**，所以 asset_pipeline 里做了兜底
+# （先解到 ASCII 临时目录再搬）。兜底已实测有效，但如果你已经有较新的 ffmpeg，
+# 优先让它走 PATH —— 那条路径更直接。
+
+imageio-ffmpeg>=0.4.9

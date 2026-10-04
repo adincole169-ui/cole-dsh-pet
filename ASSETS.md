@@ -110,24 +110,28 @@
 
 ## 六、怎么准备素材
 
-上游的 webm 是 VP9 + alpha，本项目用 ffmpeg 解码成 PNG 序列帧后播放
-（`tools/asset_pipeline.py`）。
+**本仓库已附带 106 个 webm 源**（`webm/`，51.8 MB），所以正常情况下你只需解码一次：
 
 ```powershell
-# 一条命令查看你当前缺什么、该怎么补
-python tools/fetch_assets.py
+python tools/setup_assets.py          # 并行解码全部动画，约 10 分钟
+python tools/setup_assets.py --check  # 只检查依赖与进度
 ```
 
-### 方式 A：用上游素材（最快）
+解码需要 ffmpeg（PATH 里优先，其次 `imageio-ffmpeg` 自带的，见
+`requirements-assets.txt`）。解码后的帧在 `frames/`，**不进 git** ——
+它可由 webm 随时重新生成。
+
+### 方式 A：重新取上游素材（本仓库已附带，一般用不到）
+
+只在你想**换成更新版**的上游素材时才需要：
 
 1. 从 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 取
    `dsh-pet/assets/webm/` 下的 webm，或装它的 npm 包
-2. 放进本项目的 `webm/`
-3. 确认并预解码：
+2. 覆盖本项目的 `webm/`
+3. 重新解码：
 
 ```powershell
-python main.py --check-assets
-python main.py --predecode      # 需要 ffmpeg 在 PATH 里
+python tools/setup_assets.py --force   # 强制重解
 python main.py
 ```
 

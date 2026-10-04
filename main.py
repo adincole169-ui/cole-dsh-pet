@@ -73,24 +73,64 @@ def _status():
     return 0
 
 
-def _predecode(entries, store):
-    """解码"一定会用到"的动画，消除首次播放的卡顿。
+def _predecode(entries, store, all_animations=False, jobs=None):
+    """解码动画缓存，消除首次播放的卡顿。
 
-    用同步接口是有意的：这里是启动阶段的预解码，没有界面要响应；运行中的动画切换
-    走的是 `FrameStore.request()` 的后台路径。
+    默认只解"一定会用到"的那批（idle / 点击 / 拖拽 / 张望 / 工作状态 / 碎碎念 /
+    余额 / 移动，约 26 个）；`all_animations=True` 时解全部 106 个。
+
+    **并行解码**：每个动画是一次独立 ffmpeg 进程，天然可并行。实测 6 worker
+    比串行快约 4.7 倍（27.1 秒/动画 -> 5.8 秒/动画），106 个从约 48 分钟降到约 10 分钟。
     """
-    names = []
-    for pet_config in entries:
-        for group in ("idle", "clicks", "drag", "turn"):
-            names.extend(pet_config.actions(group))
-        for group in ("workStatus", "whisper", "balance"):
-            names.extend(pet_config.event_animations(group))
-        for spec in pet_config.move_specs():
-            names.append(spec.name)
-    unique = [n for n in dict.fromkeys(names) if n]
-    for name in unique:
-        store.animation(name)
-    return unique
+    sys.path.insert(0, os.path.join(HERE, "tools"))
+    import asset_pipeline
+
+    if all_animations:
+        names = asset_pipeline.list_animations()
+    else:
+        collected = []
+        for pet_config in entries:
+            for group in ("idle", "clicks", "drag", "turn"):
+                collected.extend(pet_config.actions(group))
+            for group in ("workStatus", "whisper", "balance"):
+                collected.extend(pet_config.event_animations(group))
+            for spec in pet_config.move_specs():
+                collected.append(spec.name)
+        names = [n for n in dict.fromkeys(collected) if n]
+
+    if not names:
+        return []
+
+    # 已缓存的跳过，避免重复解码
+    pending = [name for name in names if not asset_pipeline.is_cached(name)]
+    skipped = len(names) - len(pending)
+
+    workers = jobs if jobs else asset_pipeline.default_workers()
+    total = len(pending)
+    if workers == 1:
+        print("预解码 %d 个动画（串行；已缓存 %d 个跳过）" % (total, skipped))
+    else:
+        print("预解码 %d 个动画（%d 路并行；已缓存 %d 个跳过）"
+              % (total, min(workers, total) if total else 0, skipped))
+
+    import time as _time
+    started = _time.time()
+
+    def progress(index, count, name, frames):
+        elapsed = _time.time() - started
+        rate = elapsed / max(1, index)
+        remaining = rate * (count - index)
+        print("  [%3d/%3d] %-22s %4d 帧   已用 %4.1f 分，预计还需 %4.1f 分"
+              % (index, count, name[:22], frames, elapsed / 60.0, remaining / 60.0))
+
+    results = asset_pipeline.build_all_parallel(
+        workers=workers, names=pending, progress=progress if total else None)
+    failed = [item for item in results if item[1] < 0]
+    if failed:
+        print("失败 %d 个：" % len(failed))
+        for name, _count, error in failed[:5]:
+            print("  %s: %s" % (name, error[:120]))
+    return names
 
 
 def build_app(argv):
@@ -125,10 +165,9 @@ def existing_instance(port):
 def check_assets():
     """启动前自检：有没有可用的动画素材。返回一份"体检报告"字典。
 
-    **为什么必须有这一关**：仓库里**不包含**动画素材（版权原因，见 README 的
-    "素材与许可"），别人 clone 下来若直接运行，缺素材时程序会在 Qt 回调里抛异常，
-    以 `0xC0000409` 静默闪退——**没有任何提示**，看起来就是"项目坏了"。
-    与其让人去猜，不如在开窗之前先说清楚缺什么、去哪拿。
+    **为什么必须有这一关**：别人 clone 下来时，仓库里**有 webm 源但还没有解码帧**，
+    若直接运行，程序会在 Qt 回调里抛异常，以 `0xC0000409` 静默闪退——**没有任何提示**，
+    看起来就是"项目坏了"。与其让人去猜，不如在开窗之前先说清"还差哪一步、怎么补"。
 
     判据只看**文件系统**，不依赖任何运行时状态，所以既快又不会因为别的问题误报。
     """
@@ -169,24 +208,19 @@ def report_missing_assets(info):
         "     webm 源素材 : %d 个" % info["webm"],
         "     解码帧缓存  : %d 个动画" % info["cached"],
         "",
-        "  本仓库默认不附带动画素材（体积原因；素材版权归原作者，见 ASSETS.md）。",
-        "  你需要自己准备一份，二选一：",
+        "  仓库里**有 webm 动画源，但还没有解码成帧** —— 解码一次即可（约 10 分钟）。",
         "",
-        "  ① 用上游素材（最快）",
-        "     本项目用的是 PC2005-cloud/dsh-pet 的 dsh-pet/assets/webm/，",
-        "     取来放进 webm/ 目录即可。该项目的许可是「素材允许开源使用、",
-        "     禁止商用、二创须署名」：",
-        "       https://github.com/PC2005-cloud/dsh-pet",
+        "  ① 解码现有素材（最省事，需要 ffmpeg）",
+        "     python tools/setup_assets.py",
         "",
-        "  ② 用自己的素材（推荐，完全属于你）",
-        "     把任意透明背景的动画（webm / PNG 序列）放进 frames/<动画名>/",
+        "  ② 换成自己的素材（权利最干净）",
+        "     把透明背景的动画（webm / PNG 序列）放进 frames/<动画名>/，",
         "     PNG 命名从 0001.png 开始，再改 config.jsonc 指向你的名字。",
         "",
-        "  想一步步被引导，跑：",
-        "     python tools/fetch_assets.py",
+        "  查依赖与进度：",
+        "     python tools/setup_assets.py --check",
         "",
-        "  放好之后启动时若不流畅，先跑一次预解码（需 ffmpeg）：",
-        "     python main.py --predecode",
+        "  素材版权与授权见 ASSETS.md（原作 PC2005-cloud/dsh-pet，禁止商用）。",
         "",
         "  想确认素材是否就绪：",
         "     python main.py --status",
@@ -234,9 +268,16 @@ def main():
     # `--status` 不需要这一关（它要能报告"0 个素材"，见它的输出）。
     if "--status" not in sys.argv and "--predecode" not in sys.argv:
         info = check_assets()
-        if info["cached"] == 0 and info["webm"] == 0:
+
+        # **没有解码帧就不能开窗**。判据只看 `cached`，不看 webm：
+        # 自从仓库附带 webm 之后，"有 webm、没帧"就是 clone 下来最常见的初始状态，
+        # 而它同样跑不起来（无帧 → Qt 回调里抛异常 → 0xC0000409 静默闪退）。
+        # 早先写成 `cached == 0 and webm == 0`，恰好漏掉了这个最常见的情形——实测
+        # 会直接去启动一只没有帧的桌宠，然后无声退出。
+        if info["cached"] == 0:
             report_missing_assets(info)
             return 1
+
         if "--check-assets" in sys.argv:
             print("素材就绪：%d 个 webm，%d 个动画已有解码帧"
                   % (info["webm"], info["cached"]))
@@ -271,8 +312,16 @@ def main():
         _predecode(entries, store)
 
     if "--predecode" in sys.argv:
-        names = _predecode(entries, store)
-        print("预解码 %d 个动画" % len(names))
+        # `--all` 解全部 106 个（新用户建议这么做，否则没解过的动画首次播放要等 30 秒）
+        # `--jobs N` 指定并行度；不给就按核数自动决定（见 default_workers）
+        jobs = None
+        if "--jobs" in sys.argv:
+            try:
+                jobs = int(sys.argv[sys.argv.index("--jobs") + 1])
+            except (IndexError, ValueError):
+                print("--jobs 后面要跟一个数字，例如 --jobs 6")
+                return 2
+        _predecode(entries, store, all_animations="--all" in sys.argv, jobs=jobs)
         return 0
 
     QTimer.singleShot(200, preload)

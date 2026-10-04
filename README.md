@@ -11,12 +11,11 @@
 **状态**：个人项目，已在 Windows 10/11 + PyQt5 5.9.2 / 5.15.11 上实测通过
 （16 个 Python 自检 + 6 个 Node 测试全绿）。
 
-> **关于动画素材**：本项目用的是
-> [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的
-> `dsh-pet/assets/webm/`（106 个透明动画，逐字节相同，已核实）。
-> 该项目的许可是「素材允许开源使用、禁止商用、二创须署名」。
-> **本仓库默认不把素材提交进 git**（解码后的帧有 2.56 GB），
-> 请按 [ASSETS.md](ASSETS.md) 自行准备。
+> **关于动画素材**：本仓库**已附带** 106 个 webm 动画源（51.8 MB，来自
+> [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，
+> 与上游逐字节相同，已核实）。该项目的许可是「素材允许开源使用、禁止商用、二创须署名」。
+> **解码后的帧不进仓库**（2.56 GB），clone 后用一条命令生成即可 ——
+> 见 [快速开始](#快速开始)，约 10 分钟。
 
 ---
 
@@ -97,42 +96,56 @@ DSH 插件配合，把 DSH 的会话状态变成宠物的动作与气泡。
 - **Python 3.8+**（[下载](https://www.python.org/downloads/)，安装时勾选 *Add python.exe to PATH*）
 - 想用联动功能的话：装好 [DeepSeek Harness](https://github.com/deepseek-ai) 并至少启动过一次
 
-### 一、取代码
+### 一、建环境
 
 ```powershell
 git clone <本仓库地址>
 cd <仓库目录>
-```
 
-### 二、准备素材（必需，本仓库不含）
-
-先读 [ASSETS.md](ASSETS.md)。有一条命令会**根据你现在有什么**给出具体指引：
-
-```powershell
-python tools/fetch_assets.py
-```
-
-它会告诉你：还缺什么、两条路（用你自己的素材 / 从上游取现成素材）分别怎么做、
-`ffmpeg` 与 `Pillow` 装了没有。
-
-放好之后确认：
-
-```powershell
-python main.py --check-assets
-```
-
-### 三、装依赖并启动
-
-```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### 二、一条命令解码素材（约 10 分钟）
+
+本仓库**已附带 106 个 webm 动画源**（51.8 MB）。桌宠播放用的是解码后的 PNG 帧，
+所以要先解码一次 —— 就一条命令：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 tools\setup_assets.py
+```
+
+它会检查素材与解码器、然后**并行解码全部 106 个动画**，并实时报进度。
+16 核机器实测约 **10 分钟**（串行要 48 分钟）。
+
+> **解码需要 ffmpeg。** 有两条路：
+> * 你已经装了（`ffmpeg -version` 能跑）→ 直接用，无需额外操作；
+> * 没装 → 装 `imageio-ffmpeg`（会带一个 ffmpeg 进来，不用手动配置）：
+>
+>   ```powershell
+>   .\.venv\Scripts\python.exe -m pip install -r requirements-assets.txt
+>   ```
+>
+>   它自带的是较老的 ffmpeg 4.2.2，对某些目录写文件会失败；`asset_pipeline`
+>   里做了自动兜底（改用临时目录再搬），已实测**解出的帧与新版 ffmpeg 逐像素一致**。
+>   若想更稳，建议装一个较新的 ffmpeg 放进 PATH。
+
+先看看会做什么、暂不解码：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 tools\setup_assets.py --check
+```
+
+### 三、启动
+
+```powershell
 .\.venv\Scripts\python.exe -X utf8 main.py
 ```
 
-首次启动想让动画不卡，先跑一次预解码（需要 `ffmpeg` 在 PATH 里）：
+想确认素材与解码器状态：
 
 ```powershell
-.\.venv\Scripts\python.exe -X utf8 main.py --predecode
+.\.venv\Scripts\python.exe -X utf8 main.py --check-assets
 ```
 
 ### 四、装上 DSH 联动插件（可选）
@@ -160,12 +173,22 @@ python -m venv .venv
 |---|---|
 | `--status` | 打印配置与素材统计后退出（不启动、不校验素材） |
 | `--check-assets` | 检查素材是否就绪 |
-| `--predecode` | 预解码全部常用动画后退出（CI / 预热用） |
+| `--predecode` | 预解码常用动画后退出（约 26 个） |
+| `--predecode --all` | 预解码**全部** 106 个动画（新装机建议，之后不会再有"首次播放卡 30 秒"） |
+| `--predecode --jobs N` | 指定并行度（默认按 CPU 核数自动决定 2~6；实测 6 路约 4.7 倍速） |
 | `--pet <名字>` | 用一个「种类」覆盖层启动（见 `pet/夜猫-config.json`） |
 | `--anim <名字>` | 直接播指定动画 |
 | `--watch` | 每秒记一行位置/可见性/动画名，用于排查"宠物不见了" |
 | `--force` | 跳过单一实例检查（自检脚本用） |
 | `--allow-multi` | 允许多开 |
+
+一键准备素材（等价于 `--predecode --all`，并会检查解码器）：
+
+```powershell
+python tools/setup_assets.py            # 自动并行度
+python tools/setup_assets.py --jobs 8   # 指定并行度
+python tools/setup_assets.py --check    # 只检查
+```
 
 ---
 
@@ -265,9 +288,10 @@ pet/                    「种类」覆盖层示例
 **素材是本项目原样使用的**：106 个 webm 与上游同名同内容（抽查逐字节相同，
 可用 `python tools/verify_asset_origin.py` 复核）。
 
-**为什么不把素材提交进 git**：解码后的帧有 **2.56 GB / 25423 个文件**，不适合放进
-仓库历史。而 51.8 MB 的 webm 源素材**按许可是可以随仓库分发的**——是否附带由仓库所有者
-决定。当前的 `.gitignore` 排除 `webm/`、`frames/`、`assets/`、`memes/`。
+**为什么不把解码帧提交进 git**：解码后有 **2.56 GB / 25423 个文件**，不适合放进仓库
+历史。所以本仓库分发的是 **51.8 MB 的 webm 源**（`webm/`，106 个），
+clone 后用 `python tools/setup_assets.py` 一条命令生成帧缓存（约 10 分钟）。
+`.gitignore` 排除 `frames/`、`assets/`、`memes/` 这些**可由 webm 重新生成**的产物。
 
 **与 gmskywalker/deepseek-fat-fish-codex-pet 无关**：早期文档曾把素材出处误写成那个
 仓库。核对后确认那是**另一个** DeepSeek 大肥鱼同人作品（单张图集、88 格、约 10 个状态），

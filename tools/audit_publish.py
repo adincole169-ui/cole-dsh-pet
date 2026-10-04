@@ -14,10 +14,16 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 绝不能出现在仓库里的目录/文件
-FORBIDDEN_DIRS = ["webm", "frames", "assets", "memes", "logs", "dist", ".venv",
-                  "__pycache__", "frames_old_480"]
-FORBIDDEN_SUFFIX = [".zip", ".bak", ".pyc", ".webm", ".ico"]
+# 绝不能出现在仓库里的目录/文件。
+# 注意 **`webm/` 不在这个列表里** —— 按上游许可（素材允许开源使用），106 个 webm
+# 是**有意随仓库分发**的：使用者 clone 下来就能解码使用（见 README 的快速开始）。
+# 这里排除的是"可由 webm 重新生成的大件"与私人数据。
+FORBIDDEN_DIRS = ["frames", "assets", "memes", "logs", "dist", ".venv",
+                  "__pycache__", "frames_old_480", ".decode-staging"]
+FORBIDDEN_SUFFIX = [".zip", ".bak", ".pyc", ".ico"]
+
+# 期望随仓库分发的 webm 数量（用来确认没漏、没混进别的东西）
+EXPECTED_WEBM = 106
 
 # 文件**名/路径**里不该出现的本机痕迹。同样从字符码拼，避免本文件自己含这些字符串
 # （否则审计脚本每次都会命中自己，真正的泄露反而被噪音淹没）。
@@ -148,14 +154,31 @@ def main():
     for head, count in sorted(groups.items(), key=lambda item: -item[1]):
         print("     %-22s %d 个文件" % (head, count))
 
+    # webm 是**有意**随仓库分发的，这里确认数量符合预期
+    webm_count = groups.get("webm", 0)
+    size_problem = False
+    print()
+    print("  == 随仓库分发的 webm 素材 ==")
+    print("     %d 个（期望 %d）" % (webm_count, EXPECTED_WEBM))
+    if webm_count == 0:
+        print("     提示：没有 webm —— 使用者得自己去上游取素材（见 ASSETS.md）")
+    elif webm_count != EXPECTED_WEBM:
+        print("     **数量与预期不符**，请确认是不是漏了或多加了文件")
+        size_problem = True
+    else:
+        print("     与预期一致")
+
     total = 0
     for name in staged:
         path = os.path.join(ROOT, name.strip('"'))
         if os.path.isfile(path):
             total += os.path.getsize(path)
     print()
-    print("  合计体积: %.1f KB（%d 个文件）" % (total / 1024.0, len(staged)))
-    return 0
+    print("  合计体积: %.1f MB（%d 个文件）" % (total / 1048576.0, len(staged)))
+    if total > 500 * 1048576:
+        print("     提示：超过 500 MB —— 对 git 仓库偏大，确认一下是不是误加了 frames/")
+        size_problem = True
+    return 1 if size_problem else 0
 
 
 if __name__ == "__main__":
