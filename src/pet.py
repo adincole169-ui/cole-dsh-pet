@@ -244,9 +244,12 @@ class PetWindow(QWidget):
         value = config.position.get("maskInvert")
         self.mask_invert = True if value is None else bool(value)
         self.mask_stats = None
-        # 启动窗口期：期内掩膜变化后重新按角色对齐初始位置（见 _settle_initial_placement）。
-        # __init__ 里调 _place_initial 时还没有帧/掩膜，拿不到角色的真实左右留白。
-        self._placed_at = None
+        # 启动窗口期"按角色对齐"的绝对截止时刻（见 _settle_initial_placement）：
+        # __init__ 里调 _place_initial 时还没有帧/掩膜，拿不到角色的真实左右留白，
+        # 所以要等掩膜算好之后再对齐一次；`_settle_deadline` 在下面首次摆放后设置。
+        # 这里**不能**再留一个 `_placed_at` 之类的字段 —— 那个旧写法每次对齐都续期，
+        # 导致窗口永不结束（用户报的"拖不动、松手回出生点"）。
+        self._settle_deadline = None
         self.mood_signal.connect(self.on_bridge_message)
 
         # --- 窗口 ----------------------------------------------------------- #
@@ -271,12 +274,11 @@ class PetWindow(QWidget):
 
         self.size_px = max(120, int(config.size))
         self._resize_window()
-        # 启动期"按角色对齐"的**绝对截止时刻**。
-        # 必须是绝对时刻、且**只设一次**：早先写成"每次对齐时刷新 _placed_at"，
+        # 首次摆放，然后把"启动对齐"的截止时刻设成**绝对**的一刻。
+        # 只能在首次摆放后设一次：早先的写法是每次对齐都刷新计时，
         # 而掩膜在播放动画时持续变化、每次变化都会再对齐一次 —— 于是窗口被无限续期，
         # 宠物在每个动画帧都被搬回出生点。用户若有一次按下没落在角色掩膜上
         # （`dragging` 起不来），就会看到"拖不动、松手又回到出生点"。
-        self._settle_deadline = None
         self._place_initial()
         self._settle_deadline = time.monotonic() + SETTLE_WINDOW_SEC
 
