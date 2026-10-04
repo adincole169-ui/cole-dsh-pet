@@ -1,135 +1,159 @@
 # 素材来源与许可 / Asset Provenance & Licensing
 
-**一句话**：本仓库只包含**代码**。所有动画美术素材都**没有**随仓库分发，请自行准备。
+> **本项目是基于 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的二次创作。**
+> 按该项目的要求，凡介绍、展示或分发本项目的地方，都必须附上原作者地址：
+> **<https://github.com/PC2005-cloud/dsh-pet>**
 
 ---
 
-## 为什么素材不在仓库里
-
-两个原因，任何一条都足够：
-
-1. **授权**：动画素材来自第三方同人仓库，它**没有正式开源许可证**（GitHub 上
-   `license` 为 `null`），只有一份「同人作品声明」，声明了个人非商业使用，
-   **但没有授予再分发权**。把素材打进本仓库再发布，属于未获授权的再分发。
-2. **体积**：素材解码后是 **25423 个 PNG / 2.56 GB**，远超 GitHub 的合理范围
-   （单文件 100 MB 上限、仓库建议 1 GB 以内）。
-
-所以本仓库的 `.gitignore` **显式排除** `webm/`、`frames/`、`assets/`、`memes/`。
-
----
-
-## 一、动画素材来源（必须标注）
-
-| 项目 | 说明 |
-|---|---|
-| **仓库** | [gmskywalker/deepseek-fat-fish-codex-pet](https://github.com/gmskywalker/deepseek-fat-fish-codex-pet) |
-| **作者** | [@gmskywalker](https://github.com/gmskywalker) |
-| **内容** | 「DeepSeek 大肥鱼」Codex V2 无损 RGBA 动画图集 |
-| **规格** | `spritesheet.webp`，1536×2288，8 列 × 11 行，单格 192×208，`spriteVersionNumber: 2` |
-| **许可** | **无开源许可证**（`license: null`）；README 内含「同人作品声明」：非官方、非商业、仅供个人桌面定制与技术学习，**不授予商业使用权，亦未授予再分发权** |
-
-该仓库的原始声明（节选自其 README）：
-
-> This is an unofficial, non-commercial fan-made desktop-pet package. It is not
-> affiliated with DeepSeek, OpenAI, Codex, or other rights holders. Names, logos,
-> and recognizable designs belong to their respective owners. This repository is
-> intended for personal desktop customization and technical learning; it does not
-> grant commercial rights to any underlying intellectual property.
-
-> 本项目为非官方、非商业同人桌宠……本仓库仅用于个人桌面定制与技术学习，
-> 不授予对任何底层知识产权的商业使用权。
-
-**本项目如何使用它**：`tools/asset_pipeline.py` 用 ffmpeg 把上游图集/透明动画解码成
-PNG 序列帧。这只是**本地转换**，不改变素材的权利归属，也**不代表获得授权**。
-
----
-
-## 二、功能设计与配置格式参考
+## 一、动画素材：来自 PC2005-cloud/dsh-pet
 
 | 项目 | 说明 |
 |---|---|
 | **仓库** | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) |
 | **作者** | [@PC2005-cloud](https://github.com/PC2005-cloud) |
-| **作用** | 桌面宠物的**功能设计**与 `config.jsonc` 的**分层配置模型**参考来源 |
-| **许可** | 代码 **MIT**；其素材标注禁商用、二创需署名 |
-| **npm 包** | https://www.npmjs.com/package/dsh-pet |
+| **素材位置** | `dsh-pet/assets/webm/` |
+| **内容** | **106 个透明动画**（VP9 + 第二路 alpha 流，640×360，每段 10.04 秒 / 241 帧 @24fps） |
+| **npm 包** | <https://www.npmjs.com/package/dsh-pet> |
+| **提示词** | `prompts/桌面宠物 10 秒动作提示词.md`（约 291 KB） |
 
-本项目的 `config.jsonc` 沿用它的分层合并口径（**顶层字段整段替换，不做深合并**），
-菜单结构与状态机设计也参考了它。代码是**独立实现**，没有复制其源码。
+### 已核实：是同一批文件
+
+本项目 `webm/` 里的 106 个文件与上游 `dsh-pet/assets/webm/` 的**文件名完全一致**，
+且抽查的文件**逐字节相同**（用 git blob 哈希比对——那是与仓库无关的纯内容哈希）：
+
+```
+上游 dsh-pet/assets/webm/   106 个
+本地 webm/                  106 个
+抽查 10 个                  全部逐字节相同
+```
+
+核对脚本：`python tools/verify_asset_origin.py`
+
+### 上游的许可声明（原文）
+
+```
+## 许可
+
+- 代码：MIT
+- 素材（动画/提示词/源视频）：允许开源使用，禁止商用
+- 二次创作（二创）约定：基于本项目的衍生 / 改版 / 换皮作品，在**任何介绍、展示、
+  分发该作品的地方**，须附上原作者 GitHub 地址：
+  https://github.com/PC2005-cloud/dsh-pet
+```
+
+### 这对本项目意味着什么
+
+| 条款 | 本项目的对应做法 |
+|---|---|
+| 素材允许**开源使用** | 本项目是开源项目；随仓库分发素材属于该许可允许的范围 |
+| **禁止商用** | 本项目**不得用于商业用途**，也不得把素材用于商业产品 |
+| **二创须署名** | 本项目在 README、本文件、以及任何分发处都附上原作者地址 |
+
+> **说明**：本项目**当前默认不把素材提交进仓库**（见 `.gitignore`）。原因是解码后的帧
+> 有 2.56 GB / 25423 个文件，不适合放进 git 历史。
+> 而 51.8 MB 的 webm 源素材**按许可是可以随仓库分发的**——是否附带由仓库所有者决定。
 
 ---
 
-## 三、角色形象
+## 二、功能设计与配置格式：同样来自 dsh-pet
+
+本项目的 `config.jsonc` 沿用 dsh-pet 的分层合并口径（**顶层字段整段替换，不做深合并**），
+菜单结构、状态机、工作状态与余额分档等设计也参考了它。
+
+本项目的 Python 代码是**独立实现**（PyQt5 重写），没有复制 dsh-pet 的源码。
+
+---
+
+## 三、与 gmskywalker/deepseek-fat-fish-codex-pet 的关系：**没有关系**
+
+早期版本的本文档曾把动画素材的出处误写成
+[gmskywalker/deepseek-fat-fish-codex-pet](https://github.com/gmskywalker/deepseek-fat-fish-codex-pet)，
+**那是错的**。事实对比：
+
+| | gmskywalker 的仓库 | 本项目 |
+|---|---|---|
+| 交付形态 | **1 张图集** `spritesheet.webp`（1536×2288，8 列 × 11 行 = 88 格） | **106 个独立 webm**，每个 241 帧 |
+| 动画状态 | 其 README 列 10 个状态（idle / running / waving / jumping 等） | 106 个动画 |
+| 帧的形态 | 每状态约 8 格（静态姿势） | 每段 241 帧补间 |
+
+本项目**没有使用**该仓库的任何文件。两者只是**同一个角色形象（DeepSeek 大肥鱼）的
+不同同人作品**——可以理解为"同类项目"，但不是来源。
+
+如果你看重该仓库里的某些内容（例如更高分辨率的原画），那是**另一条独立的授权链**，
+需要单独取得许可，不能与本项目的授权混为一谈。
+
+---
+
+## 四、角色形象
 
 「大肥鱼 / 鲸鱼娘」是 **DeepSeek 的社区二创形象**，DeepSeek 官方**从未发布过**
 拟人形象。相关名称、标识与可识别形象的权利归各自权利方所有。
 
+本项目与 DeepSeek 官方、OpenAI、Codex 及其它权利方**均无隶属或授权关系**。
+
 ---
 
-## 四、本仓库自己的东西
+## 五、本仓库自己的东西
 
 以下内容由本项目自行编写，适用根目录 [LICENSE](LICENSE)（MIT）：
 
 - `main.py`、`src/` 下全部代码
 - `tools/` 下全部工具脚本
 - `config.jsonc` 的结构与默认值、`pet/夜猫-config.json` 示例
-- 全部文档（README、使用指南、安装说明、AGENTS.md 等）
+- 全部文档（README、使用指南、安装说明、AGENTS.md、DEVNOTES.md 等）
 - `plugins/dsh-pet-bridge/`（DSH 联动插件）
+
+注意：**这是"本项目代码"的许可，不覆盖素材**。素材的许可见上面第一节。
 
 ---
 
-## 五、怎么自己准备素材
+## 六、怎么准备素材
 
-先跑这条命令，它会**按你当前的实际情况**给出指引（缺什么、两条路各怎么做、
-依赖装了没有）：
+上游的 webm 是 VP9 + alpha，本项目用 ffmpeg 解码成 PNG 序列帧后播放
+（`tools/asset_pipeline.py`）。
 
 ```powershell
+# 一条命令查看你当前缺什么、该怎么补
 python tools/fetch_assets.py
 ```
 
-下面是同样的内容，供直接阅读。
+### 方式 A：用上游素材（最快）
 
-### 方式 A：拿现成素材（快速看效果）
-
-从上面第一个仓库取图集，然后本地转成帧。**你自己取、自己用，属于你的个人使用**；
-请不要把取来的素材再提交到本仓库或其它公开仓库。
-
-```powershell
-# 1. 把上游的 spritesheet.webp 放到 webm/ 或直接解出 PNG
-# 2. 解码成帧（需要 ffmpeg；调色板量化需要 Pillow）
-python tools/asset_pipeline.py build-all
-```
-
-放好之后：
+1. 从 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 取
+   `dsh-pet/assets/webm/` 下的 webm，或装它的 npm 包
+2. 放进本项目的 `webm/`
+3. 确认并预解码：
 
 ```powershell
-python main.py --check-assets    # 确认素材就绪
-python main.py --predecode       # 预解码，消除首次播放的卡顿
-python main.py                   # 启动
+python main.py --check-assets
+python main.py --predecode      # 需要 ffmpeg 在 PATH 里
+python main.py
 ```
 
-### 方式 B：做你自己的角色（推荐，完全属于你）
+**再次提醒**：这样用素材属于上游许可的「开源使用」，**禁止商用**，
+并且你分发时也要保留对 <https://github.com/PC2005-cloud/dsh-pet> 的署名。
 
-这套框架**与具体角色无关**——`config.jsonc` 里指向哪些动画名，就用哪些素材。
-换角色只要两步：
+### 方式 B：做你自己的角色（推荐，权利最干净）
 
-1. **准备素材**，放进 `frames/<动画名>/`，PNG 从 `0001.png` 开始命名
-   （透明背景；也可以用 `webm/` 放透明 VP9 再解码）
-2. **改配置**，在 `config.jsonc` 里把这些名字填进
+这套框架与具体角色无关——`config.jsonc` 里指向哪些动画名就用哪些素材。
+换成你自己的素材后，本项目在素材上就不再是二创，那部分权利全归你。
+
+1. 准备透明背景的动画，放进 `frames/<动画名>/`（PNG 从 `0001.png` 起命名），
+   或 `webm/<动画名>.webm`（透明 VP9）
+2. 在 `config.jsonc` 里把这些名字填进
    `idle` / `clicks` / `drag` / `turn` / `moves` / `categories` / `events`
 
 `pet/夜猫-config.json` 是一个完整的「另一种种类」示例，可以直接照它改。
-
-任何名字在素材里不存在时，播放会**自动退回自由活动**，不会崩——所以可以边加素材边试。
-
-### 方式 C：只做一两个动作先跑起来
-
-最少只要一段待机动画就能启动：把 PNG 放进 `frames/待机呼吸休闲/`，
-`config.jsonc` 里 `idle` 指向它即可。其余动作缺失只会让它少些花样。
+任何名字在素材里不存在时，播放会**自动退回自由活动**，不会崩。
 
 ---
 
-## 六、如果你的项目要用别人的素材
+## 七、如果你要二次分发
 
-请自己去联系原作者取得**书面许可**，并把许可声明放进仓库。本项目**不代为授权**，
-也不对你使用上游素材的行为负责。
+请把下面这条**放在显眼处**（README 开头、发布页说明、安装向导等）：
+
+> 本项目基于 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 二次创作，
+> 动画素材版权归原作者，禁止商用。
+
+这是上游二创条款的硬性要求：**任何介绍、展示、分发该作品的地方**都要附上原作者地址。

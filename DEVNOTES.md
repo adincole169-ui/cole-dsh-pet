@@ -7,9 +7,19 @@
 点击 Q 弹、拖拽甩抛反弹、右键点播一百多个手绘动画，并且**跟着 DSH 会话状态切换
 工作动画与台词**。
 
-素材来自 [gmskywalker/deepseek-fat-fish-codex-pet](https://github.com/gmskywalker/deepseek-fat-fish-codex-pet)
-（Codex V2 图集，106 个透明动画）；功能对齐 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，
-但**自研实现**——当初动手时本机是 DSH `0.1.0-rc.7`，而原插件要求 `^0.2.0-rc.1`，装不上。
+素材（106 个透明动画）来自
+[PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的 `dsh-pet/assets/webm/`
+（已核实：同名同内容，抽查逐字节相同，见 `tools/verify_asset_origin.py`）。
+该项目的许可是「素材允许开源使用、禁止商用、二创须署名」——本项目是它的二创，
+所以在 README 与 ASSETS.md 都附上了原作者地址。
+
+**注意**：早期版本的这份文档与 README 曾把素材出处误写成
+[gmskywalker/deepseek-fat-fish-codex-pet](https://github.com/gmskywalker/deepseek-fat-fish-codex-pet)，
+那是错的；那个仓库与本项目没有关系（它是另一个大肥鱼同人作品，单张图集 88 格）。
+更正记录见 [ASSETS.md](ASSETS.md) 第三节。
+
+功能设计对齐 dsh-pet，但**自研实现**——当初动手时本机是 DSH `0.1.0-rc.7`，
+而原插件要求 `^0.2.0-rc.1`，装不上。
 （现在本机已升到 `0.2.0-rc.2`，两边版本都对得上了，只是实现路线不同。）
 
 运行时只依赖 **PyQt5**（numpy 可选）；帧素材随包提供，因此**不需要 ffmpeg 与 Pillow**。
@@ -866,10 +876,18 @@ pythonw -X utf8 main.py --watch
 
 ## 许可与来源
 
+> 完整的、已核实的说明见 [ASSETS.md](ASSETS.md)。这里是摘要。
+
 | 内容 | 来源 | 许可 |
 |---|---|---|
-| 106 个动画素材 | [gmskywalker/deepseek-fat-fish-codex-pet](https://github.com/gmskywalker/deepseek-fat-fish-codex-pet) | 仓库**未附许可证**，仅"同人非商业、个人使用"声明 |
-| 功能设计与配置格式 | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) | 代码 MIT；素材禁商用，二创需署名 |
-| 本程序代码 | 自研 | 随你处置；但**分发时请先替换上面的动画素材** |
+| **106 个动画素材** | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的 `dsh-pet/assets/webm/` | 素材**允许开源使用**、**禁止商用**、**二创须署名** |
+| 功能设计与配置格式 | 同上 | 代码 MIT |
+| 本程序代码（PyQt5 重写） | 自研 | [MIT](LICENSE) |
+
+- 本项目是基于 dsh-pet 的**二次创作**，分发时**必须在显眼处**附上
+  <https://github.com/PC2005-cloud/dsh-pet>。
+- **禁止商用。**
+- 与 [gmskywalker/deepseek-fat-fish-codex-pet](https://github.com/gmskywalker/deepseek-fat-fish-codex-pet)
+  **没有关系**——早期版本误标过，更正记录见 [ASSETS.md](ASSETS.md) 第三节。
 
 「大肥鱼 / 鲸鱼娘」是 DeepSeek 的社区二创形象，官方从未发布过拟人形象。

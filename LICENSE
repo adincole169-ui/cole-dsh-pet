@@ -29,11 +29,19 @@ everything under src/, everything under tools/, the config.jsonc schema and
 defaults, and the documentation.
 
 It does NOT cover any animation artwork, character design, icons or memes.
-None of those are distributed in this repository. See ASSETS.md for the
-provenance and licensing of the artwork, and for how to supply your own.
+
+This project is a DERIVATIVE WORK of PC2005-cloud/dsh-pet
+(https://github.com/PC2005-cloud/dsh-pet). The animation assets come from that
+project, and its terms apply to them: open-source use is permitted,
+COMMERCIAL USE IS PROHIBITED, and derivative works must credit the original
+author. See ASSETS.md for the full, verified provenance.
 
 本 MIT 许可证只覆盖本仓库的**源代码**（main.py、src/、tools/、config.jsonc
 的结构与默认值，以及文档）。
 
-它**不覆盖任何动画美术素材、角色形象、图标与表情包**——这些都没有随本仓库
-分发。素材的来源与许可情况见 ASSETS.md，里面也写了如何自备素材。
+它**不覆盖任何动画美术素材、角色形象、图标与表情包**。
+
+本项目是基于 PC2005-cloud/dsh-pet
+（https://github.com/PC2005-cloud/dsh-pet）的**二次创作**。动画素材来自该项目，
+适用它的条款：**允许开源使用、禁止商用、二创须署名**。
+完整且经核实的来源说明见 ASSETS.md。

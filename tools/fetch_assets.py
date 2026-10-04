@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 """引导使用者为桌宠准备素材。
 
-本仓库**不含**动画素材（版权原因，见 ASSETS.md），所以 clone 下来跑不起来是正常的。
-这个脚本把"接下来该做什么"讲清楚，并在可能的情况下直接帮他做。
+本仓库默认**不附带**动画素材（体积原因，见 ASSETS.md），所以 clone 下来跑不起来
+是正常的。这个脚本把"接下来该做什么"讲清楚。
 
 两条路：
-  A. 用自己的素材（推荐，完全属于你）
-     把透明动画放进 frames/<动画名>/ 或 webm/ 即可 —— 脚本只做检查与提示。
-  B. 从上游取现成素材（仅供你个人使用，不要提交进仓库）
-     上游是 gmskywalker/deepseek-fat-fish-codex-pet，图集 1536x2288。
-     转成帧需要 ffmpeg；调色板量化需要 Pillow。
+  A. 用上游素材（最快）
+     本项目用的就是 PC2005-cloud/dsh-pet 的 dsh-pet/assets/webm/（106 个透明动画），
+     取来放进 webm/ 即可。该项目的许可：素材允许开源使用、**禁止商用**、二创须署名。
+  B. 用自己的素材（推荐，权利最干净）
+     把透明动画放进 frames/<动画名>/ 或 webm/<动画名>.webm 即可。
+
+解码需要 ffmpeg；调色板量化需要 Pillow。
 
     python tools/fetch_assets.py            # 检查现状 + 打印指引
     python tools/fetch_assets.py --check    # 只检查
@@ -21,8 +23,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-UPSTREAM = "https://github.com/gmskywalker/deepseek-fat-fish-codex-pet"
-SHEET_PATH = "deepseek-fat-fish/spritesheet.webp"
+UPSTREAM = "https://github.com/PC2005-cloud/dsh-pet"
+UPSTREAM_ASSET_DIR = "dsh-pet/assets/webm/"
 
 
 def survey():
@@ -97,21 +99,27 @@ def main():
     print("     参考 pet/夜猫-config.json —— 那是一个完整的「另一种种类」示例。")
     print()
 
-    print("  【B】从上游取现成素材（仅供个人使用）")
+    print("  【B】用上游素材（最快）")
     print("  " + "-" * 60)
     print("     上游仓库: %s" % UPSTREAM)
-    print("     素材文件: %s" % SHEET_PATH)
-    print("     规格    : 1536x2288 无损 RGBA 图集，8 列 x 11 行，单格 192x208")
+    print("     素材位置: %s" % UPSTREAM_ASSET_DIR)
+    print("     内容    : 106 个透明动画（VP9 + 第二路 alpha 流，640x360，每段 241 帧）")
     print()
-    print("     ⚠️ 该仓库**没有开源许可证**，只在 README 里声明了非商业、个人使用，")
-    print("        **未授予再分发权**。所以：")
-    print("          * 你可以自己取来自己用；")
-    print("          * 但**不要**把取来的素材提交到本仓库或任何公开仓库；")
-    print("          * 也不要把带素材的包公开分发。")
+    print("     本项目的 webm/ 与上游同名同内容（抽查逐字节相同，可用")
+    print("     tools/verify_asset_origin.py 复核）。")
+    print()
+    print("     ⚠️ 上游的许可（原文摘要）：")
+    print("          * 素材（动画/提示词/源视频）：**允许开源使用**，**禁止商用**；")
+    print("          * 二创约定：基于它的衍生/改版/换皮作品，在**任何介绍、展示、")
+    print("            分发该作品的地方**，须附上原作者 GitHub 地址。")
+    print()
+    print("     也就是说：可以用、可以开源分发，但**不能商用**，且必须署名。")
+    print("     本项目已在 README 与 ASSETS.md 附上该地址。")
     print()
     print("     步骤：")
-    print("       1. 从上面仓库下载 %s" % SHEET_PATH)
-    print("       2. 放进本目录的 webm/ （或用 ffmpeg 解成 PNG 放进 frames/）")
+    print("       1. 从上面仓库取 %s 下的 webm" % UPSTREAM_ASSET_DIR)
+    print("          （或装它的 npm 包：https://www.npmjs.com/package/dsh-pet）")
+    print("       2. 放进本目录的 webm/")
     print("       3. 检查：  python main.py --check-assets")
     print("       4. 预解码：python main.py --predecode     # 消除首次播放卡顿")
     print("       5. 启动：  python main.py")

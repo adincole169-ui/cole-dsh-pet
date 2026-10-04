@@ -1,14 +1,22 @@
 # 大肥鱼桌宠（DSH 版）
 
-> 一只住在 Windows 桌面上的透明小女仆：无边框、常驻置顶、不占任务栏，
-> 会和 [DeepSeek Harness](https://github.com/deepseek-ai) 的会话状态联动 ——
-> 你让它干活它切"忙碌"，干完它蹦一下，出错它叹口气，余额少了它皱眉。
+> **本项目是基于 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的
+> 二次创作。** 动画素材版权归原作者，**禁止商用**；按原作者要求，在此附上其仓库地址。
+> 详见 [ASSETS.md](ASSETS.md)。
+
+一只住在 Windows 桌面上的透明小女仆：无边框、常驻置顶、不占任务栏，
+会和 [DeepSeek Harness](https://github.com/deepseek-ai) 的会话状态联动 ——
+你让它干活它切"忙碌"，干完它蹦一下，出错它叹口气，余额少了它皱眉。
 
 **状态**：个人项目，已在 Windows 10/11 + PyQt5 5.9.2 / 5.15.11 上实测通过
 （16 个 Python 自检 + 6 个 Node 测试全绿）。
 
-> ⚠️ **本仓库不包含动画素材。** 素材的版权与授权情况见
-> [ASSETS.md](ASSETS.md) —— 请先读它，再按 [快速开始](#快速开始) 准备素材。
+> **关于动画素材**：本项目用的是
+> [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的
+> `dsh-pet/assets/webm/`（106 个透明动画，逐字节相同，已核实）。
+> 该项目的许可是「素材允许开源使用、禁止商用、二创须署名」。
+> **本仓库默认不把素材提交进 git**（解码后的帧有 2.56 GB），
+> 请按 [ASSETS.md](ASSETS.md) 自行准备。
 
 ---
 
@@ -242,23 +250,35 @@ pet/                    「种类」覆盖层示例
 
 ## 素材与许可
 
-**本仓库只含代码，不含任何动画美术素材。** 完整说明见 **[ASSETS.md](ASSETS.md)**，
-这里是要点：
+> **本项目是基于 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的二次创作。**
+> 动画素材版权归原作者，**禁止商用**。本条署名按原作者对二创作品的要求，
+> 须出现在介绍、展示、分发本项目的所有地方。
+
+完整说明见 **[ASSETS.md](ASSETS.md)**，这里是要点：
 
 | 内容 | 来源 | 许可 |
 |---|---|---|
-| 动画素材 | [gmskywalker/deepseek-fat-fish-codex-pet](https://github.com/gmskywalker/deepseek-fat-fish-codex-pet) | **无开源许可证**（`license: null`）；README 含非商业同人声明，**未授予再分发权** |
-| 功能设计与配置格式 | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) | 代码 MIT |
+| **动画素材** | [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的 `dsh-pet/assets/webm/` | 素材**允许开源使用**、**禁止商用**、**二创须署名** |
+| 功能设计与配置格式 | 同上 | 代码 MIT |
 | 本仓库的代码与文档 | 本项目 | [MIT](LICENSE) |
 
+**素材是本项目原样使用的**：106 个 webm 与上游同名同内容（抽查逐字节相同，
+可用 `python tools/verify_asset_origin.py` 复核）。
+
+**为什么不把素材提交进 git**：解码后的帧有 **2.56 GB / 25423 个文件**，不适合放进
+仓库历史。而 51.8 MB 的 webm 源素材**按许可是可以随仓库分发的**——是否附带由仓库所有者
+决定。当前的 `.gitignore` 排除 `webm/`、`frames/`、`assets/`、`memes/`。
+
+**与 gmskywalker/deepseek-fat-fish-codex-pet 无关**：早期文档曾把素材出处误写成那个
+仓库。核对后确认那是**另一个** DeepSeek 大肥鱼同人作品（单张图集、88 格、约 10 个状态），
+本项目**没有使用它的任何文件**。详见 [ASSETS.md](ASSETS.md) 第三节。
+
 「大肥鱼 / 鲸鱼娘」是 **DeepSeek 的社区二创形象**，官方从未发布过拟人形象。
-相关权利归各自权利方所有。
+相关权利归各自权利方所有。本项目与 DeepSeek 官方、OpenAI、Codex 均无隶属或授权关系。
 
-**为什么素材不在仓库里**：上游**未授予再分发权**，且解码后的帧有 2.56 GB /
-25423 个文件。所以 `.gitignore` 显式排除 `webm/`、`frames/`、`assets/`、`memes/`。
-
-**换素材很容易**：这套框架与具体角色无关，`config.jsonc` 里指向哪些动画名就用哪些。
-详见 [ASSETS.md](ASSETS.md) 的「怎么自己准备素材」。
+**换成你自己的素材很容易**：这套框架与具体角色无关，`config.jsonc` 里指向哪些动画名
+就用哪些。换掉之后本项目在素材上就不再是二创。详见
+[ASSETS.md](ASSETS.md) 的「怎么准备素材」。
 
 ---
 
@@ -326,9 +346,14 @@ powershell -ExecutionPolicy Bypass -File tools\build_update.ps1
 
 ## 致谢
 
-- [gmskywalker](https://github.com/gmskywalker) —— 动画素材
-- [PC2005-cloud](https://github.com/PC2005-cloud) —— 功能设计与配置格式参考
+- [PC2005-cloud](https://github.com/PC2005-cloud) —— **动画素材**与功能设计、
+  配置格式的参考来源。本项目是基于
+  [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的二次创作。
 
 ## 许可
 
-代码与文档：[MIT](LICENSE)。**素材不在授权范围内**，见 [ASSETS.md](ASSETS.md)。
+- **本项目代码与文档**：[MIT](LICENSE)
+- **动画素材**：版权归 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)
+  原作者所有；**允许开源使用、禁止商用、二创须署名**。详见 [ASSETS.md](ASSETS.md)
+
+**本项目禁止用于商业用途。**
