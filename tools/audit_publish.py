@@ -68,8 +68,15 @@ def main():
     #   --committed  显式要求时，一律审计 HEAD 里已提交的文件
     #   默认         审计暂存区；若暂存区为空则退回 HEAD（"都已经提交了"的常见场景）
     if committed_mode or not staged:
-        code, out = git(["ls-tree", "-r", "--name-only", "HEAD"])
-        committed = [line for line in out.decode("utf-8", "replace").splitlines() if line]
+        # -z + core.quotePath=false 两个都要：
+        #   * `-z` 用 NUL 分隔，避开"路径含空格/换行"的转义；
+        #   * `core.quotePath=false` 让**非 ASCII 路径原样输出**。
+        # 少了后者时，git 会把中文名写成 `"webm/\344\270\211..."` 这种带引号的
+        # 八进制转义 —— 于是后面 `os.path.isfile()` 全部落空，106 个 webm 的体积
+        # 一个都统计不到（实测总量从 52 MB 变成 0.6 MB，500 MB 的护栏形同虚设）。
+        code, out = git(["-c", "core.quotePath=false", "ls-tree", "-r", "-z",
+                         "--name-only", "HEAD"])
+        committed = [line for line in out.decode("utf-8", "replace").split("\0") if line]
         if committed:
             if not committed_mode and not staged:
                 code, latest = git(["log", "-1", "--format=%h %s"])
