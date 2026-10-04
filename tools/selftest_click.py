@@ -38,7 +38,12 @@ def check(label, ok, detail=""):
 
 
 def mouse(kind, pos, button=Qt.LeftButton):
-    return QMouseEvent(kind, QPoint(*pos), Qt.NoButton, button, Qt.NoModifier)
+    # Qt5 签名: (type, localPos, **button**, buttons, modifiers)。
+    # 第 3 个参数才是 `event.button()`；早先这里传的是 `Qt.NoButton`，
+    # 于是 `mousePressEvent`/`mouseReleaseEvent` 里 `event.button() == Qt.LeftButton`
+    # 永不成立、处理器被整个跳过 —— 这个自检一直是**空转**的（只证明"没崩"，
+    # 从没真正走过拖动状态机）。现在按真实事件构造。
+    return QMouseEvent(kind, QPoint(*pos), button, button, Qt.NoModifier)
 
 
 def click(window, pos=(160, 90)):

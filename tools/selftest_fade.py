@@ -59,10 +59,18 @@ class StubAnimation(object):
 
 
 class FakeStore(object):
-    """只回答"缓存里有没有"，不做任何 IO。"""
+    """只回答"缓存里有没有"，不做任何 IO。
+
+    替身要覆盖 `Animator` 实际调用的**全部** store 方法：
+    peek / pin / retain / is_loading / request / has / loaded / finish_load。
+    早先漏了 `retain`，而 `Animator.play()` 里会调 `store.retain(name, 2)`
+    来钉住当前动画 —— 于是这套自检一上来就 AttributeError 失败，
+    **等于长期没在跑**（真正的淡入淡出回归反而没人看）。
+    """
 
     def __init__(self, ready):
         self._ready = ready
+        self.retained = []
 
     def peek(self, name):
         return StubAnimation(name) if self._ready else None
@@ -70,10 +78,24 @@ class FakeStore(object):
     def pin(self, name):
         pass
 
+    def retain(self, name, keep=2):
+        """钉住动画，避免被 LRU 换出。签名与 `FrameStore.retain(name, keep=2)` 一致。"""
+        self.retained.append(name)
+        return True
+
     def is_loading(self, name):
         return False
 
     def request(self, name):
+        pass
+
+    def has(self, name):
+        return bool(self._ready)
+
+    def loaded(self):
+        return []
+
+    def finish_load(self, *args, **kwargs):
         pass
 
 

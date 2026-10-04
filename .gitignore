@@ -60,6 +60,9 @@ dist/
 # 解码时的 ASCII 暂存目录（见 tools/asset_pipeline.py 的 ascii_staging_root）
 .decode-staging/
 
+# 「没有 numpy」验证用的导入钩子（tools/check_without_numpy.py 临时生成）
+.no-numpy-hook/
+
 _probe_*/
 _*_frames/
 _opt.png

@@ -69,6 +69,26 @@ NOTIFY_COOLDOWN = 90.0
 FPS_MS = 33
 DT = FPS_MS / 1000.0
 
+
+def screen_area_for(point):
+    """返回全局坐标 `point` 所在屏幕的**可用区域**（多显示器安全）。
+
+    为什么不直接用 `QApplication.screenAt()`：那个 API 是 **Qt 5.10** 才有的，
+    而本项目要在 PyQt5 5.9.2（Qt 5.9.7）上跑。所以退回到遍历 `screens()`。
+    """
+    screens = QApplication.screens()
+    for screen in screens:
+        if screen.geometry().contains(point):
+            return screen.availableGeometry()
+    if screens:
+        # 落在所有屏幕之外（例如正被拖到两块屏中间的空隙）：取中心最近的那块
+        def distance(screen):
+            centre = screen.geometry().center()
+            return (centre.x() - point.x()) ** 2 + (centre.y() - point.y()) ** 2
+        return min(screens, key=distance).availableGeometry()
+    return QApplication.primaryScreen().availableGeometry()
+
+
 # 工作状态档位 → 配置里 events.workStatus 的哪一档。
 # 文案取自 workStatusTexts（六组，和档位一一对应）。
 MOOD_ORDER = ("thinking", "busy", "filing", "roaming", "celebrating", "sighing")
@@ -251,7 +271,14 @@ class PetWindow(QWidget):
 
         self.size_px = max(120, int(config.size))
         self._resize_window()
+        # 启动期"按角色对齐"的**绝对截止时刻**。
+        # 必须是绝对时刻、且**只设一次**：早先写成"每次对齐时刷新 _placed_at"，
+        # 而掩膜在播放动画时持续变化、每次变化都会再对齐一次 —— 于是窗口被无限续期，
+        # 宠物在每个动画帧都被搬回出生点。用户若有一次按下没落在角色掩膜上
+        # （`dragging` 起不来），就会看到"拖不动、松手又回到出生点"。
+        self._settle_deadline = None
         self._place_initial()
+        self._settle_deadline = time.monotonic() + SETTLE_WINDOW_SEC
 
         # --- 事件与时钟 ------------------------------------------------------ #
         self.animator.frame_changed = self.frame_changed
@@ -317,8 +344,11 @@ class PetWindow(QWidget):
         按"距顶 100px"摆放只会让它先出现在右上角、然后掉到屏幕最底被任务栏挡住——
         那看起来就是"宠物消失了"。想让它真的挂在上方，要写 `corner: top-*` **并且**
         关掉重力（`physics.gravity: 0`）。
+
+        对齐的是**宠物当前所在那块屏**：多显示器时若一律按主屏算，副屏上的宠物
+        点「回到初始位置」会被搬到主屏去。
         """
-        area = QApplication.primaryScreen().availableGeometry()
+        area = self.current_screen_area()
         position = self.config.position
         corner = str(position.get("corner") or "bottom-right")
         margin_x = int(position.get("marginX", 24))
@@ -346,10 +376,12 @@ class PetWindow(QWidget):
         y = max(area.top(), min(area.top() + area.height() - height, y))
         self.pos_x, self.pos_y = float(x), float(y)
         self.vy = 0.0
-        # 记录对齐时刻：启动窗口期内的掩膜变化会再对齐一次（见 _settle_initial_placement）
-        self._placed_at = time.monotonic()
         self.vx = 0.0
         self.move(int(self.pos_x), int(self.pos_y))
+        # 注意：这里**不碰** `_settle_deadline`。对齐的截止时刻由调用方负责：
+        # `__init__` 在首次摆放后设一次；`_user_took_over()` 把它清掉。
+        # 早先在这里写 `self._placed_at = time.monotonic()`，等于每次都续期，
+        # 让"启动期"永不结束（见 __init__ 里的说明）。
 
     def apply_flags(self):
         visible = self.isVisible()
@@ -376,8 +408,11 @@ class PetWindow(QWidget):
         这里**故意用窗口高度**而不是角色的可见底边：角色脚底就画在窗口底部
         （`sprite_rect` 让精灵贴着 `top_pad + height`），所以窗口底 == 角色底。
         左右方向则不同——那里的透明留白在**两侧**，所以贴边要用 `character_insets()`。
+
+        "地面"取**宠物所在那块屏**的底部：多显示器时，用主屏的地面会让副屏上的
+        宠物掉到一个够不着的高度（或者被吸回主屏）。
         """
-        area = QApplication.primaryScreen().availableGeometry()
+        area = self.current_screen_area()
         return float(area.bottom() - self.height())
 
     def set_mode(self, key):
@@ -417,8 +452,31 @@ class PetWindow(QWidget):
         if self.animator.move is None:
             self._manual_move = False
 
+    def current_screen_area(self):
+        """宠物**当前所在屏幕**的可用区域。
+
+        为什么要按"所在屏幕"而不是一律取 `primaryScreen()`：多显示器时，
+        把宠物拖到副屏之后，物理的墙壁判定若仍按主屏来算，一松手就会把它
+        拽回主屏的边角 —— 用户看到的正是"拖过去，松手就消失、又出现在出生点"。
+        拖动过程中 `step_physics` 跳过墙壁判定，所以问题只在松手后暴露。
+
+        用**窗口中心**判定所在屏幕：宠物贴边时有一圈透明留白挂在屏幕外，
+        但中心一定还在屏内。
+
+        注意启动最早期：`__init__` 里 `_place_initial()` 是在 `pos_x` 赋值**之前**
+        调的，这时还没有位置可用 —— 直接退回主屏（宠物本来就诞生在主屏）。
+        """
+        pos_x = getattr(self, "pos_x", None)
+        pos_y = getattr(self, "pos_y", None)
+        if pos_x is None or pos_y is None:
+            return QApplication.primaryScreen().availableGeometry()
+        centre = QPoint(int(pos_x + self.width() / 2.0),
+                        int(pos_y + self.height() / 2.0))
+        return screen_area_for(centre)
+
     def step_physics(self):
-        area = QApplication.primaryScreen().availableGeometry()
+        # 用宠物所在的那块屏，不用 primaryScreen（见 current_screen_area）
+        area = self.current_screen_area()
         if not self.dragging:
             # 重力：`gravity: 0` 表示不要重力，宠物停在原处不再下沉
             if self.use_gravity():
@@ -739,15 +797,21 @@ class PetWindow(QWidget):
         为什么要跟随几秒：不同动画的角色宽度不同（`mask.rect` 实测在 105~238 之间
         浮动），启动时会连切几个动画，只对齐第一次仍会偏（实测偏 14px）。
 
+        **截止时刻是绝对的、且只设一次**（`_settle_deadline`）。这一点是硬要求：
+        掩膜在播放动画时持续变化，如果每次对齐都续期，这个"启动期"就永远不会结束，
+        宠物会在每个动画帧被搬回角落 —— 用户看到的就是"拖不动、松手回到出生点"。
+
         **用户一碰就永久停止**（`_user_took_over()`）：否则他刚把宠物拖到别处，
         一换动画就会被拽回角落。
         """
         if self.dragging:
             return
-        started = getattr(self, "_placed_at", None)
-        if started is None:
+        deadline = getattr(self, "_settle_deadline", None)
+        if deadline is None:
             return
-        if time.monotonic() - started > SETTLE_WINDOW_SEC:
+        if time.monotonic() > deadline:
+            # 过期就彻底关掉，省得每帧都来算一次
+            self._settle_deadline = None
             return
         self._place_initial()
 
@@ -757,7 +821,7 @@ class PetWindow(QWidget):
         由鼠标按下、「走走看」等**用户主动**的移动调用。自检里也可以直接调它，
         把"启动期自动对齐"关掉，这样测的是物理/模式逻辑而不是摆放逻辑。
         """
-        self._placed_at = None
+        self._settle_deadline = None
 
     def _mask_stats(self, bitmap):
         """占用区域的量化指标。
@@ -993,7 +1057,9 @@ class PetWindow(QWidget):
         # 自动对齐会把它又拽回角落——实测 `/place {"center":true}` 之后角色中心
         # 停在 1203 而不是屏幕中心 640。
         self._user_took_over()
-        area = QApplication.primaryScreen().availableGeometry()
+        # 居中对齐用**宠物当前所在屏幕**，不是主屏：多显示器时按主屏居中，
+        # 会把副屏上的宠物直接搬到主屏中央。
+        area = self.current_screen_area()
         if payload.get("center") or (payload.get("x") is None and payload.get("y") is None):
             # 居中的是**角色**而不是窗口：窗口左右有透明留白，按窗口居中会让角色
             # 看起来偏了一点。
