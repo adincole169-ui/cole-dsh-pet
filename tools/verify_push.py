@@ -17,9 +17,6 @@ import sys
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPO = "adincole169-ui/cole-dsh-pet"
-API = "https://api.github.com/repos/" + REPO
-PROXY = os.environ.get("DSH_PROXY", "http://127.0.0.1:7897")
 
 
 def git(args):
@@ -29,9 +26,38 @@ def git(args):
             done.stderr.decode("utf-8", "replace").strip())
 
 
+def remote_repo():
+    """从 origin 的 URL 里解析出 `owner/name`，不写死在代码里。"""
+    _code, url, _err = git(["remote", "get-url", "origin"])
+    if not url:
+        return None
+    cleaned = url.strip()
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+    if cleaned.startswith("git@"):                 # git@github.com:owner/name
+        cleaned = cleaned.split(":", 1)[-1]
+    elif "://" in cleaned:                         # https://github.com/owner/name
+        cleaned = cleaned.split("://", 1)[1]
+        cleaned = cleaned.split("/", 1)[-1]
+    parts = [part for part in cleaned.split("/") if part]
+    if len(parts) >= 2:
+        return "/".join(parts[-2:])
+    return None
+
+
+REPO = remote_repo()
+API = "https://api.github.com/repos/" + REPO if REPO else None
+# GitHub API 走代理；可用 DSH_PROXY 覆盖，不给就走直连
+PROXY = os.environ.get("DSH_PROXY") or os.environ.get("HTTPS_PROXY") or ""
+
+
 def api(path=""):
-    handler = urllib.request.ProxyHandler({"http": PROXY, "https": PROXY})
-    opener = urllib.request.build_opener(handler)
+    if not API:
+        raise RuntimeError("没有配置 origin 远程，无法查询 GitHub")
+    handlers = []
+    if PROXY:
+        handlers.append(urllib.request.ProxyHandler({"http": PROXY, "https": PROXY}))
+    opener = urllib.request.build_opener(*handlers)
     request = urllib.request.Request(API + path,
                                      headers={"User-Agent": "dsh-pet-verify"})
     with opener.open(request, timeout=20) as response:
