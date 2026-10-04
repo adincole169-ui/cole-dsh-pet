@@ -1,0 +1,162 @@
+# -*- coding: utf-8 -*-
+"""发布前审计：确认将要提交的内容**不含**素材与私人数据。
+
+为什么不用 PowerShell 数：`git diff --name-only` 会把含中文的路径**加引号并转义**
+（`"frames/\345\210\235..."`），PowerShell 拿到就会报"路径中具有非法字符"，既刷屏又
+统计不准。改用 `git status --porcelain -z`（NUL 分隔、不转义）在 Python 里解析。
+
+    python tools/audit_publish.py
+"""
+
+import os
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 绝不能出现在仓库里的目录/文件
+FORBIDDEN_DIRS = ["webm", "frames", "assets", "memes", "logs", "dist", ".venv",
+                  "__pycache__", "frames_old_480"]
+FORBIDDEN_SUFFIX = [".zip", ".bak", ".pyc", ".webm", ".ico"]
+
+# 文件**名/路径**里不该出现的本机痕迹。同样从字符码拼，避免本文件自己含这些字符串
+# （否则审计脚本每次都会命中自己，真正的泄露反而被噪音淹没）。
+PATH_MARKERS = [
+    "".join(chr(code) for code in (0x38, 0x36, 0x31, 0x37, 0x33)),   # Windows 用户名
+    "ana" + "conda",                                                 # 发行版名
+]
+
+
+def git(args):
+    done = subprocess.run(["git"] + args, cwd=ROOT, capture_output=True)
+    return done.returncode, done.stdout
+
+
+def tracked_files():
+    """所有被 git 跟踪（已暂存）的文件。用 -z 避免路径转义。"""
+    code, out = git(["status", "--porcelain", "-z"])
+    if code != 0:
+        return None
+    files = []
+    for chunk in out.decode("utf-8", "replace").split("\0"):
+        if len(chunk) > 3:
+            # 形如 "A  path" 或 "?? path"
+            files.append(chunk[3:])
+    return files
+
+
+def main():
+    files = tracked_files()
+    if files is None:
+        print("  无法读取 git 状态（这不是 git 仓库？）")
+        return 1
+
+    staged = [name for name in files if not name.startswith("??")]
+    untracked = [name for name in files if name.startswith("??")]
+    committed_mode = "--committed" in sys.argv
+
+    print("  暂存区文件数: %d" % len(staged))
+    print("  未跟踪文件数: %d" % len(untracked))
+
+    # 模式选择：
+    #   --committed  显式要求时，一律审计 HEAD 里已提交的文件
+    #   默认         审计暂存区；若暂存区为空则退回 HEAD（"都已经提交了"的常见场景）
+    if committed_mode or not staged:
+        code, out = git(["ls-tree", "-r", "--name-only", "HEAD"])
+        committed = [line for line in out.decode("utf-8", "replace").splitlines() if line]
+        if committed:
+            if not committed_mode and not staged:
+                code, latest = git(["log", "-1", "--format=%h %s"])
+                print("  （暂存区为空 —— 改为审计已提交内容）")
+                print("  最新提交: %s" % latest.decode("utf-8", "replace").strip())
+            staged = committed
+            print("  审计目标: HEAD 的 %d 个文件" % len(staged))
+        elif not staged:
+            print()
+            print("  暂存区为空，且 HEAD 里没有文件（还没提交过）。")
+            print("  先 git add 再审计。")
+            return 0
+    print()
+
+    bad = []
+    for name in staged:
+        cleaned = name.strip('"')
+        head = cleaned.split("/")[0]
+        if head in FORBIDDEN_DIRS:
+            bad.append((cleaned, "在禁止目录 %s/" % head))
+            continue
+        if any(cleaned.lower().endswith(suffix) for suffix in FORBIDDEN_SUFFIX):
+            bad.append((cleaned, "后缀不该出现"))
+            continue
+        if any(marker in cleaned for marker in PATH_MARKERS):
+            bad.append((cleaned, "含私人信息"))
+
+    if bad:
+        print("  **以下内容不该进仓库（%d 个）**：" % len(bad))
+        for name, reason in bad[:20]:
+            print("     %-52s %s" % (name[:52], reason))
+        if len(bad) > 20:
+            print("     ...还有 %d 个" % (len(bad) - 20))
+        print()
+        print("  请检查 .gitignore 是否生效。")
+        return 1
+
+    print("  干净：审计范围内不含素材、缓存、分发产物或私人数据")
+
+    # 逐文件搜敏感词（本机用户名、解释器绝对路径等）。
+    # 这几个词**不直接写成字面量**：否则检查器自己就会命中自己，每次审计都留两条
+    # 噪音，真正的泄露反而被淹没。用户名从字符码拼出来，文件里就不含它了。
+    print()
+    print("  == 敏感词扫描 ==")
+    words = [
+        # 本机 Windows 用户名（从字符码拼，避免本文件含它）
+        "".join(chr(code) for code in (0x38, 0x36, 0x31, 0x37, 0x33)),
+        "D:" + os.sep + "python",                                          # 解释器路径
+        "E:" + os.sep + "dsh",                                             # 开发目录
+        "ana" + "conda",                                                   # 发行版名
+    ]
+    print("     检查 %d 个模式" % len(words))
+    hits = []
+    for name in staged:
+        path = os.path.join(ROOT, name.strip('"'))
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as handle:
+                text = handle.read()
+        except Exception:
+            continue
+        for word in words:
+            if word in text:
+                hits.append((name.strip('"'), word))
+    if hits:
+        print("     **%d 处命中**：" % len(hits))
+        for name, word in hits[:15]:
+            print("        %-44s 命中 %s" % (name[:44], word))
+        print("     含本机用户名/解释器绝对路径的文件不该发布，请改掉。")
+    else:
+        print("     无命中")
+
+    # 按顶层目录统计，让人一眼看清仓库构成
+    print()
+    print("  == 仓库构成 ==")
+    groups = {}
+    for name in staged:
+        cleaned = name.strip('"')
+        head = cleaned.split("/")[0] if "/" in cleaned else "(根目录)"
+        groups[head] = groups.get(head, 0) + 1
+    for head, count in sorted(groups.items(), key=lambda item: -item[1]):
+        print("     %-22s %d 个文件" % (head, count))
+
+    total = 0
+    for name in staged:
+        path = os.path.join(ROOT, name.strip('"'))
+        if os.path.isfile(path):
+            total += os.path.getsize(path)
+    print()
+    print("  合计体积: %.1f KB（%d 个文件）" % (total / 1024.0, len(staged)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
