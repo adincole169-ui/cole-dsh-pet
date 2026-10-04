@@ -30,7 +30,9 @@ LOG = os.path.join(ROOT, "logs", "pet-run.log")
 LOG_LIMIT = 1024 * 1024      # 1 MB
 LOG_KEEP = 256 * 1024        # 裁到 256 KB
 # 需要一起管的日志（都放在 logs/ 下）
-LOG_PATTERNS = ("pet-run.log", "watch.log", "whisper-steps.log", "crash*.txt", "out*.txt")
+# drag.log 是拖动诊断（每次用户拖动一行），量很小但也要一起裁，免得长期累积。
+LOG_PATTERNS = ("pet-run.log", "watch.log", "whisper-steps.log", "drag.log",
+                "crash*.txt", "out*.txt")
 
 
 def trim_log(path, limit=LOG_LIMIT, keep=LOG_KEEP):

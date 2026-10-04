@@ -40,6 +40,16 @@ ICON_ICO = os.path.join(ROOT, "assets", "icon.ico")
 # 而 pet.py 里并没有这个变量，NameError 被 except 吞掉，日志为空被误读成
 # "函数没被调用"，白白多查了一轮。
 WHISPER_STEPS_LOG = os.path.join(ROOT, "logs", "whisper-steps.log")
+# 拖动诊断日志：每次"按下 -> 松手"记一行。
+#
+# 为什么值得单独记：用户报"拖不动、松手回出生点"时，两种可能的原因给出的
+# 处置完全不同，而**光看现象分不出来**：
+#   * 按下根本没到桌宠（窗口掩膜不含那一点 / 事件被别的窗口吃掉）
+#     -> 日志里连 press 行都不会有；
+#   * 按到了但窗口没跟着动（自动对齐把它拽回去 / 鼠标抓取被打断）
+#     -> 有 press 行，但位移接近 0。
+# 这条日志只在用户主动拖动时写一行，不会刷屏。
+DRAG_LOG = os.path.join(ROOT, "logs", "drag.log")
 MEME_DIR = os.path.join(ROOT, "memes")
 FONT_FAMILY = "Microsoft YaHei UI"
 # 「给用户看的名字」只有一个来源：`config.jsonc` 里的 `displayName`（见 `PetConfig`）。
@@ -1286,8 +1296,11 @@ class PetWindow(QWidget):
         if event.button() != Qt.LeftButton:
             return
         moved = (event.globalPos() - self.press_pos).manhattanLength() if self.press_pos else 0
+        start = self.drag_history[0] if self.drag_history else (self.pos_x, self.pos_y)
         self.dragging = False
         self.press_pos = None
+        # 记一行拖动诊断：位移为 0 还是没记，直接区分"没按到"与"按到了没动"
+        self._log_drag(start, (self.pos_x, self.pos_y), moved)
         power = float(self.config.physics.get("throwPower", 1.0))
         if moved < 6:
             self.squash_target = 1.3
@@ -1300,6 +1313,33 @@ class PetWindow(QWidget):
                 self.vy = (y1 - y0) / (DT * len(self.drag_history)) * power
             self.vy = min(self.vy, 0.0) if abs(self.vy) > 1400 else self.vy
         event.accept()
+
+    def _log_drag(self, start, end, moved):
+        """把一次"按下 -> 松手"记进 `logs/drag.log`。
+
+        用户报"拖不动"时，两种原因的现象一样但处置完全不同，靠猜会走弯路：
+
+          * **连这一行都没有** -> 按下根本没到桌宠。查窗口掩膜（`setMask` 同时裁输入）、
+            是否有别的置顶窗口吃掉了点击、以及那一点是否落在角色的透明区域。
+          * **有这一行但窗口位移约 0** -> 按到了，但窗口没跟着动。查自动对齐是否
+            还在生效（`_settle_deadline`）、以及拖动中 `setMask` 是否打断了鼠标抓取。
+
+        只写用户主动拖动的次数，不会刷屏；出错也绝不能影响拖动本身。
+        """
+        try:
+            os.makedirs(os.path.dirname(DRAG_LOG), exist_ok=True)
+            with open(DRAG_LOG, "a", encoding="utf-8") as handle:
+                handle.write("%s press=收到 moved=%d window=(%.0f,%.0f)->(%.0f,%.0f) "
+                             "settle=%s anim=%s\n"
+                             % (time.strftime("%m-%d %H:%M:%S"), moved,
+                                start[0], start[1], end[0], end[1],
+                                "还在生效" if self._settle_deadline else "已关闭",
+                                (self.animator.playing.name
+                                 if self.animator.playing else "")))
+        except Exception:
+            # 记日志失败不该影响拖动。但**不留静默 except**：写到 stderr，
+            # 免得以后又把"日志为空"误读成"没被调用"（这个坑踩过）。
+            sys.stderr.write("dsh-pet: 拖动日志写入失败\n")
 
     def contextMenuEvent(self, event):
         self.menu.popup(event.globalPos())
