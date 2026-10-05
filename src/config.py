@@ -15,7 +15,7 @@ import json
 import os
 import re
 
-from move import MoveSpec
+from move import REFERENCE_WIDTH, MoveSpec
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -180,15 +180,26 @@ class PetConfig(object):
         return float(self.animation_weights.get(group, 1.0))
 
     def move_specs(self):
-        """`animations.moves.actions[]` 解析成 MoveSpec 列表。"""
+        """`animations.moves.actions[]` 解析成 MoveSpec 列表。
+
+        **距离要按宠物尺寸缩放**：配置里的 minDist/maxDist 是以「基准宠物宽
+        `move.REFERENCE_WIDTH`（462）」写的，这里按 `实际 size / 462` 换算 ——
+        小宠物挪小步、大宠物挪大步。这个缩放原先只写在 `config.jsonc` 的注释里、
+        代码里没有，于是 size=320 的宠物仍按 462 的步长走（偏大约 44%）。
+        """
         entry = self.animations.get("moves") or {}
         actions = entry.get("actions") if isinstance(entry, dict) else None
+        try:
+            width = float(self.size)
+        except (TypeError, ValueError):
+            width = 0.0
+        scale = (width / REFERENCE_WIDTH) if width > 0 else 1.0
         specs = []
         for item in actions or []:
             if isinstance(item, str):
-                specs.append(MoveSpec(item))
+                specs.append(MoveSpec(item, scale=scale))
             elif isinstance(item, dict) and item.get("name"):
-                specs.append(MoveSpec(item["name"], item.get("params")))
+                specs.append(MoveSpec(item["name"], item.get("params"), scale=scale))
         return specs
 
     def event_animations(self, group):

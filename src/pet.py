@@ -565,10 +565,15 @@ class PetWindow(QWidget):
                 self.pos_x = float(area.left() - inset_left)
                 self.vx = -self.vx * float(self.config.physics.get("restitution", 0.78))
                 self.animator.facing = 1
+                # **移动动画要一起掉头**：只翻 facing／vx 不够 —— `move_vx` 是
+                # `start_move()` 里定死的，下一帧又按原方向发 `moved(...)`，宠物会
+                # 贴着墙把剩下的距离"走"完（DEVNOTES 第 29 条）。
+                self.animator.steer_move(1)
             elif self.pos_x + self.width() - inset_right > area.right():
                 self.pos_x = float(area.right() - self.width() + inset_right)
                 self.vx = -self.vx * float(self.config.physics.get("restitution", 0.78))
                 self.animator.facing = -1
+                self.animator.steer_move(-1)
             if self.config.physics.get("ceilingBounce") and self.pos_y < area.top():
                 self.pos_y = float(area.top())
                 self.vy = -self.vy * float(self.config.physics.get("restitution", 0.78))

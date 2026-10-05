@@ -15,6 +15,7 @@
 
 import math
 import random
+import time
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
@@ -27,11 +28,9 @@ FPS_FALLBACK = 24.0
 # 每个动作可以用 `moves.actions[].params.speedScale` 在此基础上调快慢 —— 那条
 # 路径就是"部分动作也可以有位移，但速度慢一点"（见 move.MoveSpec.speed_scale）。
 #
-# **注意**：`config.jsonc` 里 `moves` 那段的注释说 minDist/maxDist 会"运行时按
-# 实际size/462 等比缩放"，但代码里**没有这回事** —— `MoveSpec.distance()` 返回的
-# 就是原始像素、`config.move_specs()` 也不做缩放。所以那个说法目前是错的；
-# 本常量同理，是绝对像素而不是按尺寸归一的。要真的按宠物大小缩放，得在这里
-# （以及 distance 那一侧）乘上 `config.size / 462.0`。
+# 距离那一边**已经**按宠物尺寸缩放了（`config.move_specs()` 传 `size/REFERENCE_WIDTH`
+# 给 MoveSpec，见 move.REFERENCE_WIDTH）；速度这一边**没有**缩放，也就是说小宠物
+# 走同样的 px/s、但步长更短 —— 与配置注释里"小宠物挪小步"的口径一致。
 MOVE_SPEED = 120.0
 
 
@@ -134,6 +133,8 @@ class Animator(QObject):
         self._movement_allowed = True
         self.recent = []          # 最近播过的动画名，避免连播
         self.work_status = None   # 由 DSH 事件驱动的覆盖态
+        # 最近一次"撞墙掉头"的时刻，用来避免在窄空间里每帧翻转（见 steer_move）
+        self._last_steer = 0.0
         # 最近一次实际画出去的帧：切换时拿它当交叉淡化的垫层
         self.last_frame = None
 
@@ -344,6 +345,32 @@ class Animator(QObject):
             return True
         self.move = None
         return False
+
+    def steer_move(self, direction):
+        """把移动方向改成 `direction`（+1 向右 / -1 向左）。撞墙掉头用。
+
+        **为什么需要它**：`move_vx` 是在 `start_move()` 里**一次性定死**的。撞墙时
+        `step_physics` 只把 `self.vx` 取反、并翻转 `animator.facing`，`move_vx` 不变
+        —— 下一帧 `_tick` 又按原方向发 `moved(move_vx, True)`，`on_move` 便把 `vx`
+        设回原方向。结果是宠物**贴着墙把剩下的 `move_left` 耗完**（逐帧日志见
+        DEVNOTES 第 29 条：帧 66 起 pos_x 恒为 1066.0 不再变，而位移只有 6 px）。
+
+        这里按"墙在哪边"显式给方向（而不是简单取反）：取反依赖 `move_vx` 当前的符号，
+        而撞墙有可能是被别的东西推的，显式更稳。
+
+        带一个最小间隔：如果宠物被夹在很窄的空间里，每帧都掉头会变成抖动。
+        0.3 秒一次足够让它"来回踱步"而不是抽搐。
+        """
+        if self.move is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_steer < 0.3:
+            return False
+        self._last_steer = now
+        speed = abs(self.move_vx)
+        self.move_vx = speed if direction >= 0 else -speed
+        self.facing = 1 if direction >= 0 else -1
+        return True
 
     def play_click(self):
         names = self.config.actions("clicks")
