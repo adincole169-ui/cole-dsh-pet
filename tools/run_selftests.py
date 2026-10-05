@@ -19,6 +19,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PYTHON = sys.executable
 DEFAULT_TIMEOUT = 120
+# 需要联网/克隆/打包的测试天然更慢，给它们单独的预算。
+# 踩过：`verify_public_clone` 要 clone 两次（还跑一遍桌宠），实测 87~130 秒浮动，
+# 用默认 120 秒会随网络状况随机"超时失败"——那种失败看起来像代码问题，
+# 但重跑一次就过，纯属噪声。
+PER_TEST_TIMEOUT = {
+    "verify_public_clone": 420,
+    "verify_clone_icon_loads": 420,
+    "verify_remote_icons": 300,
+    "verify_update_zip": 300,
+    "verify_fresh_clone": 300,
+    "verify_asset_origin": 300,
+    "selftest_whisper_live": 300,
+}
 
 # 这些需要真实环境/联网/打包产物，默认不跑（可用 --only 单独跑）
 SLOW_OR_ENV = ("selftest_whisper_live", "selftest_standalone", "verify_push",
@@ -63,16 +76,17 @@ def main():
     started_all = time.time()
     for index, name in enumerate(names):
         path = os.path.join(HERE, name + ".py")
+        limit = PER_TEST_TIMEOUT.get(name, DEFAULT_TIMEOUT)
         started = time.time()
         try:
             done = subprocess.run([PYTHON, "-X", "utf8", path], cwd=ROOT,
                                   capture_output=True, text=True,
-                                  timeout=DEFAULT_TIMEOUT)
+                                  timeout=limit)
             code = done.returncode
             output = (done.stdout or "") + (done.stderr or "")
         except subprocess.TimeoutExpired:
             code = -9
-            output = "超时 %d 秒" % DEFAULT_TIMEOUT
+            output = "超时 %d 秒" % limit
         elapsed = time.time() - started
         results.append((name, code, elapsed, output))
         mark = "[通过]" if code == 0 else "[失败]"

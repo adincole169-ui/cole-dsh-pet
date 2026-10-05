@@ -60,6 +60,16 @@ def _status():
     }.get(source, source)))
     print("  可用 webm: %d 个；解码帧缓存: %d 个" % (info["webm"], info["cached"]))
     print("  ffmpeg: %s" % (stream_frames.ffmpeg_path() or "**找不到**"))
+    # 用户配置层要报出来：它不进 git、`git pull` 不会碰它，所以"改了配置没生效"时
+    # 第一件要确认的事就是"到底有没有这一层、它在不在生效"。
+    from config import CONFIG_USER_PATH, load_user
+    user_layer = load_user()
+    if os.path.exists(CONFIG_USER_PATH):
+        print("  用户配置层: 有（%s，%d 个顶层字段）"
+              % (os.path.basename(CONFIG_USER_PATH), len(user_layer)))
+    else:
+        print("  用户配置层: 无（个人改动可写进 %s，它不进 git、更新时不会冲突）"
+              % os.path.basename(CONFIG_USER_PATH))
     print("配置里的宠物: %d 只" % len(entries))
     for pet_config in entries:
         # 内部物种名（name）与给用户看的名字（displayName）**都打出来**：

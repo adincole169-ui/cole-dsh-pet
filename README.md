@@ -26,6 +26,7 @@
 - [功能](#功能)
 - [快速开始](#快速开始)
 - [配置](#配置)
+- [更新](#更新)
 - [架构](#架构)
 - [素材与许可](#素材与许可)
 - [开发](#开发)
@@ -254,6 +255,27 @@ python tools/setup_assets.py --check    # 只检查
 
 ---
 
+## 更新
+
+**已经装过 / 下载过的人看 [UPDATE.md](UPDATE.md)。**
+
+一句话版本（`git clone` 拿的）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\pull.ps1
+```
+
+它做四件事：**检查本地改动 → 停桌宠 → `git pull` → 依赖变了才重装 → 重启**。
+
+> ⚠️ **必须先停桌宠**：`stream` 模式下 ffmpeg 一直开着 `webm/*.webm`，
+> 不停掉的话 `git pull` 会报 `unable to unlink old ...: Invalid argument`
+> （注意是 `Invalid argument` 而不是权限错误，很容易查错方向）。
+
+**个人配置请写进 `config.user.jsonc`**（复制 `config.user.example.jsonc` 开始）：
+它**不进 git**，所以 `git pull` 永远不会因为"你改过配置"而冲突。
+
+---
+
 ## 架构
 
 ```
@@ -263,7 +285,7 @@ src/
   animator.py           当前播放、交叉淡化、移动规格、状态机
   frames.py             帧来源（stream 流式解码 / cache 预解码 PNG）、LRU + 钉住
   stream_frames.py      流式解码：常驻 ffmpeg + 环形缓冲 + 按消费位置背压
-  config.py             JSONC 解析、分层合并、种类覆盖
+  config.py             JSONC 解析、分层合并（主配置 → 用户层 → 种类覆盖）
   bridge.py             本地 HTTP 显示服务（127.0.0.1:8899）
   chat.py / notify.py / move.py
 plugins/dsh-pet-bridge/ DSH 插件：把会话事件推给桌宠（127.0.0.1:8900）

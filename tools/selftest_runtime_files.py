@@ -36,6 +36,16 @@ ROOT_NAMES = {"ROOT", "HERE", "BASE_DIR", "PROJECT_ROOT"}
 RUNTIME_DIRS = ("logs",)
 # 可选：可由 webm 生成（缺了不算错，但会在报告里提示）
 OPTIONAL_DIRS = ("frames",)
+# 可选：**不存在是正常的**文件（分类按"整条路径"匹配，因为这些是文件不是目录）。
+#
+# `config.user.jsonc` 是用户个人配置层：绝大多数人没有它（它是用
+# `config.user.example.jsonc` 复制出来的），代码里也用 `os.path.exists` 先判断再读。
+# 它被 `config.py` 引用、所以一定会被扫出来，但"缺失"不该算错。
+#
+# 注意：这个清单**不是随手加的豁免**。main() 里有一条断言，要求列在这里的每个文件
+# 都**确实被代码引用**——否则说明它已经改名/删掉了，这个豁免就成了死条目，
+# 而"清单慢慢腐烂"正是这类豁免最危险的失败方式。
+OPTIONAL_FILES = ("config.user.jsonc",)
 
 
 def is_os_path_join(node):
@@ -100,6 +110,8 @@ def scan():
 
 
 def classify(relative):
+    if relative in OPTIONAL_FILES:
+        return "optional"
     head = relative.split("/")[0]
     if head in RUNTIME_DIRS:
         return "runtime"
@@ -114,6 +126,16 @@ def main():
     print("  检查运行时需要的文件（清单从代码里提取，不是手写的）")
     print("  " + "=" * 70)
     print("  %-42s %-9s %s" % ("路径", "分类", "状态"))
+
+    # **豁免清单不能腐烂**：列进 OPTIONAL_FILES 的路径必须确实还被代码引用。
+    # 否则（文件改了名、或代码里删掉了那个常量）这条豁免就永远沉默地失效，
+    # 而真正需要它的新路径不会被发现 —— 这类"白名单慢慢腐坏"是很隐蔽的失败方式。
+    stale = [item for item in OPTIONAL_FILES if item not in referenced]
+    if stale:
+        print("  **OPTIONAL_FILES 里有死条目**（代码里已经不再引用它们）：%s"
+              % "、".join(stale))
+        print("  请删掉这些条目，或检查是不是路径改了名。")
+        return 1
 
     required_missing = []
     optional_missing = []
@@ -145,8 +167,18 @@ def main():
           % (len(referenced), len(runtime_paths)))
     print("  已存在: %d" % present)
     if optional_missing:
-        print("  可选缺失（可由 webm 生成）: %s" % ", ".join(optional_missing))
-        print("     提示：跑 python tools/setup_assets.py 补齐")
+        print("  可选缺失 %d 个：" % len(optional_missing))
+        # **每一项给各自的补齐办法**：早先这里只有一句"跑 setup_assets.py 补齐"，
+        # 而 `config.user.jsonc` 跟 webm 毫无关系 —— 按提示去跑解码只会白等十分钟。
+        for relative in optional_missing:
+            if relative.startswith("frames"):
+                hint = "跑 python tools/setup_assets.py 从 webm 生成（仅 cache 模式需要）"
+            elif relative.endswith("config.user.jsonc"):
+                hint = ("从 config.user.example.jsonc 复制一份"
+                        "（只在你想覆盖默认配置时才需要）")
+            else:
+                hint = "见 DEVNOTES 对应说明"
+            print("     %-34s %s" % (relative, hint))
 
     print()
     if required_missing:

@@ -177,7 +177,7 @@ pythonw.exe -X utf8 main.py --pet 我的猫
 
 ---
 
-## 踩过的坑（30 条）
+## 踩过的坑（32 条）
 
 前三条都是"看起来该对、实际不对"，而且症状都不指向真正的原因。
 
@@ -1121,6 +1121,64 @@ else:
 教训和 [第 25 条](#25-是不是派生物不能决定要不要进仓库图标缺了会静默少功能) 是同一类：
 **文档里写了、代码里没做，而且症状是"手感不对"这种没人会去查文档的东西。**
 发现它的路径也不是读文档，而是为了修另一个问题去量真实距离，才对不上。
+
+### 31. `Set-Content -Encoding UTF8` 会写 **BOM**，而带 BOM 的 JSON 不是给机器读的
+
+写一键更新脚本时顺手发现：`install.ps1` / `update.ps1` 都用
+
+```powershell
+$payload | ConvertTo-Json -Depth 4 | Set-Content -Path $StatusPath -Encoding UTF8
+```
+
+写各自的 `*-status.json`。**Windows PowerShell 5.1 的 `-Encoding UTF8` 会写入 BOM**
+（三个字节 `EF BB BF`）。实测新脚本生成的 `pull-status.json` 前三个字节正是
+`239,187,191`。
+
+**为什么这是真 bug**：包里的 `AGENTS.md` 明确要求智能体
+
+> 不要靠解析中文输出判断成败，读这个文件：`install-status.json`
+
+而带 BOM 的 JSON 会被**严格解析器直接拒绝**：
+
+* Python `json.load(open(p, encoding='utf-8'))` → `Expecting value: line 1 column 1`；
+* Node `JSON.parse(fs.readFileSync(p, 'utf8'))` → `Unexpected token`；
+* 只有 PowerShell 自己的 `ConvertFrom-Json` 容忍它。
+
+也就是说**契约在 PowerShell 里成立、在智能体手里不成立** —— 而智能体恰恰是它的
+目标读者。这个坑还特别隐蔽：用人眼看文件内容是**完全正常**的（BOM 不可见），
+在 PowerShell 里测也**完全正常**。
+
+修法（三处都改）：用 `[System.IO.File]::WriteAllText` 配
+`New-Object System.Text.UTF8Encoding($false)`（`$false` = 不写 BOM）。修完实测
+`pull-status.json` 前三个字节变成 `123,13,10`（`{` + CR + LF），Python 能正常解析。
+
+顺带两件事：
+
+* `*-status.json` 是**运行时产物**，已加进 `.gitignore` —— 否则 `pull.ps1` 跑一次
+  就会在 `tools/` 下留一个待提交文件（实测就是这么发现的：`check_syntax.py` 报
+  `tools/pull-status.json` 不是合法 JSON）；
+* 同一个坑还有**反方向**的要求：`.ps1` 文件本身必须是 UTF-8 **with** BOM
+  （规则 2）。同一份文件里两个方向的要求同时存在，很容易搞混。
+
+### 32. 「代码引用」不等于「必须存在」——给自检加豁免时要防它腐烂
+
+加用户配置层之后，`tools/selftest_runtime_files.py` **正确地**失败了：它从代码里
+用 AST 提取所有 `os.path.join(ROOT, ...)` 路径并要求它们存在，于是新加的
+`config.user.jsonc` 被判成"运行时必需但缺失"。
+
+而它的正确状态是**可选** —— 那是用户个人配置层，绝大多数人没有（从
+`config.user.example.jsonc` 复制出来才有），代码里也是先 `os.path.exists` 再读。
+
+于是加了 `OPTIONAL_FILES` 豁免清单。但**豁免清单会腐烂**：文件改名、或代码里删掉
+那个常量之后，这条豁免就永远沉默地失效，而真正需要它的新路径不会被发现。
+所以同时加了一条断言：**列在清单里的路径必须确实还被代码引用**，否则报错。
+
+反向验证过（临时清空 `OPTIONAL_FILES`）：跳出"有 1 个运行时必需的文件不在仓库里：
+config.user.jsonc（被 src/config.py 引用）"，退出码 1 ✓
+
+同一次还修了它输出里的一句**误导性提示**：原先所有"可选缺失"都提示
+"跑 `python tools/setup_assets.py` 补齐"，而 `config.user.jsonc` 跟 webm 毫无关系 ——
+按那个提示去跑解码只会白等十分钟。改成**按项给各自的补齐办法**。
 
 ### 诊断"宠物不见了"
 

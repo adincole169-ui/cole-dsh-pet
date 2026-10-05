@@ -20,6 +20,16 @@ from move import REFERENCE_WIDTH, MoveSpec
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CONFIG_PATH = os.path.join(ROOT, "config.jsonc")
+# **用户个人配置层**（层级最高）。
+#
+# 它**不进 git**（`.gitignore` 排除），所以 `git pull` 永远不会因为它产生冲突 ——
+# 这正是加它的目的：使用者把"我自己改的那些"写在这里，仓库里那份 `config.jsonc`
+# 保持干净，更新时不必解冲突。
+#
+# 格式与 `config.jsonc` 完全一致（JSONC，允许注释），合并语义也是**整段替换**：
+# 这里写了 `pets` 就整段盖掉主配置的 `pets`。
+# 模板见仓库里的 `config.user.example.jsonc`。
+CONFIG_USER_PATH = os.path.join(ROOT, "config.user.jsonc")
 
 DEFAULTS = {
     "size": 462,
@@ -83,6 +93,38 @@ def strip_comments(text):
 
 
 def load(path=CONFIG_PATH):
+    """读取主配置，并叠加**用户个人层**。
+
+    用户层是 `config.user.jsonc`（**不进 git**，见 .gitignore）。加它是为了让
+    "使用者改了配置"这件事**不再与 `git pull` 冲突**：仓库里那份 `config.jsonc`
+    始终是干净的，个人改动写在另一个文件里，两边互不干扰。
+
+    层级（低 → 高）：`config.jsonc` → `config.user.jsonc` → 种类文件
+    → （种类路径下）再叠一次 `config.user.jsonc`。最后那一步见
+    `pet_configs_for_species()` 的注释。
+
+    传自定义 `path` 时**不叠**用户层 —— 那是测试/实验用的，不该被本机配置污染。
+    """
+    base = _read_jsonc(path, "config.jsonc")
+    if path != CONFIG_PATH:
+        return base
+    user = load_user()
+    return _merged(base, user) if user else base
+
+
+def load_user():
+    """读取用户个人配置层 `config.user.jsonc`。
+
+    不存在就返回 `{}`（绝大多数人不需要它）。解析失败**抛错而不是忽略**：
+    静默忽略会让人以为"我的配置没生效是程序的问题"，而真实原因是 JSON 写错了。
+    """
+    if not os.path.exists(CONFIG_USER_PATH):
+        return {}
+    return _read_jsonc(CONFIG_USER_PATH, "config.user.jsonc")
+
+
+def _read_jsonc(path, label):
+    """读一个 JSONC 文件。三个配置层共用，避免三份重复的解析代码。"""
     if not os.path.exists(path):
         return {}
     with open(path, "r", encoding="utf-8") as handle:
@@ -90,7 +132,7 @@ def load(path=CONFIG_PATH):
     try:
         parsed = json.loads(strip_comments(raw))
     except ValueError as error:
-        raise RuntimeError("config.jsonc 解析失败: %s" % error)
+        raise RuntimeError("%s 解析失败: %s" % (label, error))
     return parsed if isinstance(parsed, dict) else {}
 
 
@@ -253,25 +295,23 @@ def load_species(name):
     这样加一个新种类只需在 `pet/` 放一个 JSON，不必碰主配置。
     """
     path = os.path.join(SPECIES_DIR, "%s-config.json" % name)
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as handle:
-        raw = handle.read()
-    try:
-        parsed = json.loads(strip_comments(raw))
-    except ValueError as error:
-        raise RuntimeError("种类配置 %s 解析失败: %s" % (name, error))
-    return parsed if isinstance(parsed, dict) else {}
+    return _read_jsonc(path, "种类配置 %s" % name)
 
 
 def pet_configs_for_species(config, species):
-    """按种类名挑选宠物：种类文件里的 `pets` 优先，否则回退到主配置。"""
+    """按种类名挑选宠物：种类文件里的 `pets` 优先，否则回退到主配置。
+
+    **用户层最后再叠一次**：`load()` 里已经叠过，但种类文件在那之后覆盖了它 ——
+    而"我个人改的那一项"应当比"某个种类的预设"更优先。漏掉这一步的症状是
+    "选了种类之后，我自己的配置就不生效了"。
+    """
     overlay = load_species(species)
-    if not overlay:
-        merged = dict(config or {})
-    else:
-        merged = dict(config or {})
+    merged = dict(config or {})
+    if overlay:
         merged.update(overlay)
+    user = load_user()
+    if user:
+        merged.update(user)
     entries = merged.get("pets") or []
     result = [PetConfig(entry, merged) for entry in entries if isinstance(entry, dict)]
     result = [item for item in result if item.display != "none"]

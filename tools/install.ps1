@@ -55,9 +55,22 @@ function Write-Status($ok, $code, $stage, $message, $extra) {
     }
     if ($extra) { foreach ($key in $extra.Keys) { $payload[$key] = $extra[$key] } }
     try {
-        $payload | ConvertTo-Json -Depth 4 | Set-Content -Path $StatusPath -Encoding UTF8
+        # **必须写成不带 BOM 的 UTF-8。**
+        # 【Set-Content -Encoding UTF8】在 Windows PowerShell 5.1 下会**写入 BOM**，
+        # 而带 BOM 的 JSON 会被严格解析器直接拒绝：Python 的 json.load 报
+        # "Expecting value: line 1 column 1"，Node 的 JSON.parse 同样失败
+        # （只有 PowerShell 自己的 ConvertFrom-Json 容忍它）。
+        # 这个文件是**给智能体读的**（见包里的 AGENTS.md 要求"不要靠解析中文输出，
+        # 读 install-status.json"），所以 BOM 会真的把它挡住。
+        Write-JsonNoBom $StatusPath $payload
     } catch { }
     return $payload
+}
+
+function Write-JsonNoBom($path, $payload) {
+    $json = $payload | ConvertTo-Json -Depth 4
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($path, $json, $utf8NoBom)
 }
 
 function Fail($lines, $stage, $code) {

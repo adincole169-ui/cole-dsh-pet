@@ -7,11 +7,16 @@
 #
 # 于是本仓库的取舍是：
 #   * `webm/`（51.8 MB，106 个）**进仓库** —— 使用者 clone 下来就有素材，
-#     只需解码一次即可用（`python tools/setup_assets.py`，约 10 分钟）；
-#   * `frames/`（2.56 GB / 25423 个文件）**不进仓库** —— 远超 GitHub 的合理范围
+#     默认 `frameSource: "stream"` 直接就能跑，**不需要任何准备步骤**；
+#     （改用 `cache` 模式才需要解码一次：tools/setup_assets.py）
+#   * `frames/`（约 2.6 GB / 25423 个文件）**不进仓库** —— 远超 GitHub 的合理范围
 #     （单文件 100 MB 上限、仓库建议 1 GB 以内），而且它完全可由 webm 重新生成；
-#   * `assets/` 与 `memes/` 也不进 —— 它们是本项目的派生物，用 tools/ 里的脚本
-#     随时可从 webm 重新生成。
+#   * `assets/` 与 `memes/` **进仓库** —— 体积很小（共约 790 KB）且 `assets/icon.ico`
+#     是运行必需的：缺了它窗口、任务栏、桌面快捷方式都没有图标，
+#     而且 `pet.py` 的 `make_icon()` 只是静默退回空 QIcon，界面上看不出原因。
+#     （曾把整个 `assets/` 排除过，结果从 GitHub 装的人"图标是没有的"。）
+#   * `config.user.jsonc` **不进仓库** —— 那是使用者自己的配置层，
+#     排除它之后 `git pull` 永远不会因为"本地改过配置"而冲突。
 #
 # ⚠️ 写法注意：**.gitignore 不支持行尾注释**。下面这些
 #      webm/    # 说明文字
@@ -42,6 +47,11 @@ logs/
 *.log
 *.bak
 config.jsonc.bak-*
+
+# **用户个人配置层**：使用者把"我自己改的那些"写在这里，就不会与 git pull 冲突。
+# 模板 `config.user.example.jsonc` 是进仓库的（供参考），真实那份不进。
+config.user.jsonc
+
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -61,11 +71,20 @@ dist/
 
 # ---------------------------------------------------------------- 临时与探针产物
 
+# 脚本生成的结果文件（install.ps1 / update.ps1 / pull.ps1）——运行时产物，不进仓库
+*-status.json
+
 # 解码时的 ASCII 暂存目录（见 tools/asset_pipeline.py 的 ascii_staging_root）
 .decode-staging/
 
 # 「没有 numpy」验证用的导入钩子（tools/check_without_numpy.py 临时生成）
 .no-numpy-hook/
+
+# GitHub API 的匿名限额只有 60 次/小时，所以 tools/verify_asset_origin.py 会把上游
+# tree 缓存到 tools/_upstream_tree.json（111 KB）。那是**缓存**，不是仓库内容 ——
+# 实测它被 `git add -A` 带了进来。删了会自动重新取。
+tools/_upstream_tree.json
+_upstream_tree.json
 
 _probe_*/
 _*_frames/
