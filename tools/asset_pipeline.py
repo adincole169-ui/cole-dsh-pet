@@ -319,13 +319,19 @@ def build(name, width=TARGET_WIDTH, force=False):
     若失败，改用**纯 ASCII 暂存目录再搬进来** —— 因为 imageio-ffmpeg 自带的
     ffmpeg 4.2.2 在本项目的 `frames/<中文名>/` 下写文件会失败（实测可复现，
     换个中文目录却成功，原因未查明）。已实测该兜底有效。
+
+    **查缓存的顺序必须在查 webm 之前**。原先先查 `webm/<名>.webm`，没有就抛
+    "没有这个动画" —— 于是"帧已经在 `frames/` 里、但没有对应 webm"的动画
+    （手工准备好的素材、只发了帧缓存的包、高清演示）**永远用不了**，
+    而且调用方会反复重试，日志被刷满。既然帧已经就绪，就没有理由再要 webm。
     """
-    source = os.path.join(WEBM_DIR, name + ".webm")
-    if not os.path.exists(source):
-        raise FileNotFoundError("没有这个动画: %s" % name)
     destination = cache_dir(name)
     if is_cached(name) and not force:
         return frame_count(name)
+
+    source = os.path.join(WEBM_DIR, name + ".webm")
+    if not os.path.exists(source):
+        raise FileNotFoundError("没有这个动画: %s" % name)
 
     if os.path.isdir(destination):
         shutil.rmtree(destination)
