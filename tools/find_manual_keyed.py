@@ -18,7 +18,17 @@ import os
 import sys
 import time
 
-ROOTS = [r"E:\dsh", "E:\\", "D:\\", r"C:\Users\86173"]
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(_HERE)
+
+# 搜索根目录**从环境取**，不写死机器专属路径。
+# 早先这里硬编码了 `C:\Users\<用户名>` —— 改公开前体检时它成了唯一一处
+# "会暴露这是谁机器"的内容（见 tools/audit_before_public.py）。
+# `os.path.expanduser("~")` 等价且可移植，也不必在仓库里留用户名。
+ROOTS = [_REPO, os.path.expanduser("~")]
+for _drive in ("E:\\", "D:\\"):
+    if os.path.isdir(_drive) and _drive not in ROOTS:
+        ROOTS.append(_drive)
 SKIP = {
     "windows", "$recycle.bin", "system volume information", "program files",
     "program files (x86)", "programdata", "appdata\\local\\temp",

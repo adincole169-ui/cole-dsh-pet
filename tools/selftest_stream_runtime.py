@@ -30,7 +30,23 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-PYTHONW = r"D:\python\anaconda\pythonw.exe"
+
+
+def _pythonw():
+    """找到无控制台窗口的 pythonw.exe。
+
+    **不要写死机器路径**：早先是 `D:\\python\\anaconda\\pythonw.exe`，既不可移植，
+    也是"公开前体检"要清掉的机器专属信息。改为按当前解释器推导：
+    同目录下的 pythonw.exe（Anaconda / 官方安装包都是这么放的），找不到就退回
+    当前解释器本身（会有控制台窗口，但功能一致）。
+    """
+    executable = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if os.path.isfile(executable):
+        return executable
+    return sys.executable
+
+
+PYTHONW = _pythonw()
 WATCH_LOG = os.path.join(ROOT, "logs", "watch.log")
 RUN_LOG = os.path.join(ROOT, "logs", "pet-run.log")
 HEALTH = "http://127.0.0.1:8899/health"
