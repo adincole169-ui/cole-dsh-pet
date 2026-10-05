@@ -26,11 +26,15 @@ frames/
 # 重新解码时的回退备份（frames_old_480 之类）
 frames_old_*/
 
-# 图标：由 tools/make_icon.py 从 webm 生成
-assets/
-
-# 表情包：由 tools/make_memes.py 从 webm 生成
-memes/
+# 图标与表情包**要进仓库**：它们虽然是从 webm 生成的派生物，但体积很小
+# （共约 790 KB），而且 `assets/icon.ico` 是**运行必需**的 —— 缺了它窗口与任务栏
+# 就没有图标（`pet.py` 的 `make_icon()` 会退回空 QIcon），桌面快捷方式也没图标
+# （`install.ps1` 指向同一个文件）。曾经把整个 `assets/` 排除掉，结果从 GitHub
+# 装的人"图标是没有的"。
+#
+# 唯一例外是 `assets/icon-full.*`：应用不引用、当前 `tools/make_icon.py` 也不生成，
+# 属于早期留下的孤儿文件，不进仓库。
+assets/icon-full.*
 
 # ---------------------------------------------------------------- 运行痕迹
 

@@ -15,15 +15,26 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 绝不能出现在仓库里的目录/文件。
-# 注意 **`webm/` 不在这个列表里** —— 按上游许可（素材允许开源使用），106 个 webm
-# 是**有意随仓库分发**的：使用者 clone 下来就能解码使用（见 README 的快速开始）。
-# 这里排除的是"可由 webm 重新生成的大件"与私人数据。
-FORBIDDEN_DIRS = ["frames", "assets", "memes", "logs", "dist", ".venv",
+#
+# 两个目录**有意不在**这个列表里：
+#   * `webm/` —— 按上游许可（素材允许开源使用），106 个 webm 随仓库分发，
+#     使用者 clone 下来就能解码使用（见 README 的快速开始）；
+#   * `assets/` 与 `memes/` —— 体积很小（共约 790 KB）且 `assets/icon.ico`
+#     **运行必需**：缺了它窗口与任务栏就没有图标，而且代码不会报错。
+#     曾经把整个 `assets/` 排除掉，结果从 GitHub 装的人"图标是没有的"。
+#     （`assets/icon-full.*` 是孤儿文件，明确排除，见 .gitignore）
+#
+# 这里排除的是"体积大且可由 webm 重新生成"的东西，以及私人数据。
+FORBIDDEN_DIRS = ["frames", "logs", "dist", ".venv",
                   "__pycache__", "frames_old_480", ".decode-staging"]
-FORBIDDEN_SUFFIX = [".zip", ".bak", ".pyc", ".ico"]
+FORBIDDEN_SUFFIX = [".zip", ".bak", ".pyc"]
 
-# 期望随仓库分发的 webm 数量（用来确认没漏、没混进别的东西）
+# 期望随仓库分发的素材数量（用来确认没漏、没混进别的东西）
 EXPECTED_WEBM = 106
+EXPECTED_ICONS = 4          # icon.ico / icon.png / icon-head.ico / icon-head.png
+EXPECTED_MEMES = 8
+# 明确不该出现的孤儿文件
+FORBIDDEN_FILES = ["assets/icon-full.ico", "assets/icon-full.png"]
 
 # 文件**名/路径**里不该出现的本机痕迹。同样从字符码拼，避免本文件自己含这些字符串
 # （否则审计脚本每次都会命中自己，真正的泄露反而被噪音淹没）。
@@ -161,19 +172,51 @@ def main():
     for head, count in sorted(groups.items(), key=lambda item: -item[1]):
         print("     %-22s %d 个文件" % (head, count))
 
-    # webm 是**有意**随仓库分发的，这里确认数量符合预期
+    # webm / 图标 / 表情包都是**有意**随仓库分发的，这里确认数量符合预期
     webm_count = groups.get("webm", 0)
+    icon_count = groups.get("assets", 0)
+    meme_count = groups.get("memes", 0)
     size_problem = False
     print()
-    print("  == 随仓库分发的 webm 素材 ==")
-    print("     %d 个（期望 %d）" % (webm_count, EXPECTED_WEBM))
+    print("  == 随仓库分发的素材 ==")
+    print("     webm 动画 : %d 个（期望 %d）" % (webm_count, EXPECTED_WEBM))
     if webm_count == 0:
-        print("     提示：没有 webm —— 使用者得自己去上游取素材（见 ASSETS.md）")
+        print("        提示：没有 webm —— 使用者得自己去上游取素材（见 ASSETS.md）")
     elif webm_count != EXPECTED_WEBM:
-        print("     **数量与预期不符**，请确认是不是漏了或多加了文件")
+        print("        **数量与预期不符**，请确认是不是漏了或多加了文件")
         size_problem = True
     else:
-        print("     与预期一致")
+        print("        与预期一致")
+
+    print("     图标      : %d 个（期望 %d）" % (icon_count, EXPECTED_ICONS))
+    if icon_count == 0:
+        print("        **一个图标都没有** —— 窗口与任务栏会没有图标，且代码不报错。")
+        print("        生成: python tools/make_icon.py")
+        size_problem = True
+    elif icon_count != EXPECTED_ICONS:
+        print("        **数量与预期不符**（期望 icon.ico / icon.png / "
+              "icon-head.ico / icon-head.png 四个）")
+        size_problem = True
+    else:
+        print("        与预期一致")
+
+    print("     表情包    : %d 个（期望 %d）" % (meme_count, EXPECTED_MEMES))
+    if meme_count == 0:
+        print("        提示：没有表情包 —— 碎碎念配图功能会静默地退化成无图")
+    elif meme_count != EXPECTED_MEMES:
+        print("        **数量与预期不符**（生成: python tools/make_memes.py）")
+        size_problem = True
+    else:
+        print("        与预期一致")
+
+    # 孤儿文件不该混进来
+    tracked_names = set(name.strip('"') for name in staged)
+    strays = [path for path in FORBIDDEN_FILES if path in tracked_names]
+    if strays:
+        print()
+        print("  **不该出现的孤儿文件**：%s" % ", ".join(strays))
+        print("     它们不被任何代码引用，也不由当前工具生成（见 .gitignore）")
+        size_problem = True
 
     total = 0
     for name in staged:

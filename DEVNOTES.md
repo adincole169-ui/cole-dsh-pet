@@ -174,7 +174,7 @@ pythonw.exe -X utf8 main.py --pet 我的猫
 
 ---
 
-## 踩过的坑（24 条）
+## 踩过的坑（25 条）
 
 前三条都是"看起来该对、实际不对"，而且症状都不指向真正的原因。
 
@@ -889,6 +889,50 @@ if "top" in corner or not self.use_gravity():
 
 教训：单屏机器上写"屏幕几何"，等于只在一种配置下测过。
 凡是取 `primaryScreen()` 的地方，都要问一句"如果宠物在另一块屏上呢"。
+
+### 25. "是不是派生物"不能决定"要不要进仓库"——图标缺了会静默少功能
+
+用户报："GitHub 上发出去的他们用起来图标是没有的。"
+
+根因：打包发布时把整个 `assets/` 目录排除在 `.gitignore` 外，理由是"图标是从
+`webm/待机呼吸休闲.webm` 裁出来的派生物，可由 `tools/make_icon.py` 重新生成"。
+理由本身没错，但**漏了一个更重要的问题：运行时要不要它**。
+
+`src/pet.py` 的 `make_icon()`：
+
+```python
+if os.path.exists(ICON_ICO):        # assets/icon.ico
+    ...
+if os.path.exists(ICON_PATH):       # assets/icon.png
+    return QIcon(ICON_PATH)
+return QIcon()                      # 两个都没有 -> 空图标，且不报错
+```
+
+于是缺图标的效果是：**窗口和任务栏都没有图标，桌面快捷方式也是白板**
+（`install.ps1` 的 `$icon` 指向同一个文件）。而整个程序**不会抛任何异常**，
+不写日志、不弹提示 —— 从使用者看就是"这个软件没有图标"，从开发者看一切正常。
+
+修法：
+* `assets/`（4 个：`icon.ico` / `icon.png` / `icon-head.ico` / `icon-head.png`）
+  与 `memes/`（8 个）**进仓库**，合计约 790 KB，相对于 52 MB 的 webm 可以忽略；
+* `assets/icon-full.*` 是孤儿（应用不引用、当前 `make_icon.py` 也不生成），
+  单独排除并写进审计的 `FORBIDDEN_FILES`；
+* `make_icon()` 在两者都缺时**写一行 stderr 指路**（本项目"不留静默失败"的惯例）。
+
+**回归自检**：`tools/selftest_runtime_files.py`。它不手写清单——那样迟早与代码脱节
+——而是用 AST 扫 `src/` 与 `main.py` 里所有 `os.path.join(ROOT, "a", "b")` 常量，
+得到"代码引用了哪些项目内路径"，再逐个验证存在性。`logs/` 归为运行时创建、
+`frames/` 归为可选，其余**缺一即失败**。已反向验证：临时移走 `assets/icon.ico`
+它必须失败（实测退出码 1，并指出被 `src/pet.py` 引用）。
+
+`tools/verify_fresh_clone.py` 也补上了硬期望（`assets`/`memes`/`webm` 必须在、
+`frames`/`logs` 必须不在、四个图标文件逐个点名）——原先它只**打印**目录在不在、
+没有断言，所以图标缺失一路放行。
+
+教训有两条：
+
+1. **判断文件该不该进仓库，要同时问"运行时要不要它"**，不能只看是不是派生物；
+2. **"打印检查结果"不等于"检查"**——没有断言的输出，在出问题时和没检查一样。
 
 ### 诊断"宠物不见了"
 

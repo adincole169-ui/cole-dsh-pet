@@ -190,6 +190,10 @@ def make_icon():
     优先用**多尺寸的 .ico**：任务栏按钮要 16/32px、托盘要 16/24/32px、alt-tab 要
     更大，Qt 从 `.ico` 里能直接取到对应档位；只给一张 256 的 PNG 时它每次都要现缩，
     小尺寸下细节会糊。`.png` 作为兜底。
+
+    **两个文件都缺时不再静默**：返回空 QIcon 的效果是"窗口和任务栏都没有图标"，
+    而用户看不出原因。曾经把 `assets/` 整个排除在仓库外，从 GitHub 装的人就是
+    "图标是没有的"。所以这里写一行 stderr 指路。
     """
     if os.path.exists(ICON_ICO):
         icon = QIcon(ICON_ICO)
@@ -197,6 +201,10 @@ def make_icon():
             return icon
     if os.path.exists(ICON_PATH):
         return QIcon(ICON_PATH)
+    sys.stderr.write(
+        "dsh-pet: 找不到图标 %s / %s —— 窗口与任务栏将没有图标。\n"
+        "         生成方式: python tools/make_icon.py\n"
+        % (os.path.relpath(ICON_ICO, ROOT), os.path.relpath(ICON_PATH, ROOT)))
     return QIcon()
 
 

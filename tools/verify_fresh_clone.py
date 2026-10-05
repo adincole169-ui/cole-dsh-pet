@@ -62,12 +62,51 @@ def main():
     print("  [1/4] 导出仓库跟踪的文件到 %s" % CLONE)
     copied = export_tracked(CLONE)
     print("        复制 %d 个文件" % copied)
-    for name in ("frames", "assets", "memes", "logs"):
+
+    # 期望：webm / 图标 / 表情包**在**，解码帧与日志**不在**
+    #
+    # 这里必须写死期望值而不是"看到什么算什么"：曾经把整个 assets/ 排除在仓库外，
+    # 那份"检查"只打印了目录存在与否、没有断言，于是**图标缺失一路放行**，
+    # 直到用户报"图标是没有的"才暴露。
+    expected_dirs = {
+        "assets": True,      # assets/icon.ico 是运行必需（窗口/任务栏图标）
+        "memes": True,       # 碎碎念配图
+        "webm": True,        # 106 个动画源
+        "frames": False,     # 2.56 GB，由 setup_assets.py 生成
+        "logs": False,       # 运行时创建
+    }
+    problems = []
+    for name, should_exist in expected_dirs.items():
         exists = os.path.isdir(os.path.join(CLONE, name))
-        print("        %-8s 存在: %s %s" % (name, exists, "" if not exists else "**不该有**"))
+        if exists == should_exist:
+            verdict = "在（符合预期）" if should_exist else "不在（符合预期）"
+        else:
+            verdict = "**不该有**" if exists else "**缺失**"
+            problems.append("%s 应当%s" % (name, "存在" if should_exist else "不存在"))
+        print("        %-8s %s" % (name, verdict))
+
     webm = os.path.join(CLONE, "webm")
     webm_count = len([f for f in os.listdir(webm)]) if os.path.isdir(webm) else 0
+    if webm_count != 106:
+        problems.append("webm 应当 106 个，实为 %d" % webm_count)
     print("        webm     %d 个（应当 106）" % webm_count)
+
+    # 运行必需的具体文件：图标是这次出问题的地方
+    for icon in ("assets/icon.ico", "assets/icon.png",
+                 "assets/icon-head.ico", "assets/icon-head.png"):
+        if not os.path.isfile(os.path.join(CLONE, icon.replace("/", os.sep))):
+            problems.append("缺 %s（窗口/任务栏图标就没了）" % icon)
+    for required in ("config.jsonc", "main.py", "requirements.txt"):
+        if not os.path.isfile(os.path.join(CLONE, required)):
+            problems.append("缺 %s" % required)
+
+    if problems:
+        print()
+        print("        **新检出缺东西**：")
+        for item in problems:
+            print("           %s" % item)
+        return 1
+    print("        图标 4 个、表情包与 webm 齐全")
 
     print()
     print("  [2/4] setup_assets.py --check")

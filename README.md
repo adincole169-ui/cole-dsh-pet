@@ -291,7 +291,14 @@ pet/                    「种类」覆盖层示例
 **为什么不把解码帧提交进 git**：解码后有 **2.56 GB / 25423 个文件**，不适合放进仓库
 历史。所以本仓库分发的是 **51.8 MB 的 webm 源**（`webm/`，106 个），
 clone 后用 `python tools/setup_assets.py` 一条命令生成帧缓存（约 10 分钟）。
-`.gitignore` 排除 `frames/`、`assets/`、`memes/` 这些**可由 webm 重新生成**的产物。
+
+**但图标与表情包是随仓库分发的**（`assets/` 4 个、`memes/` 8 个，合计约 790 KB）：
+它们虽然也是从 webm 生成的派生物，但 `assets/icon.ico` 是**运行必需**的——
+缺了它窗口与任务栏就没有图标，而且代码**不会报错**，只是静默地少一个功能。
+所以判断一个文件该不该进仓库，不能只看"是不是派生物"，还要看"运行时要不要它"。
+`tools/selftest_runtime_files.py` 会把这件事变成机器可查的。
+
+`.gitignore` 只排除 `frames/`（体积大且可再生成）。
 
 **与 gmskywalker/deepseek-fat-fish-codex-pet 无关**：早期文档曾把素材出处误写成那个
 仓库。核对后确认那是**另一个** DeepSeek 大肥鱼同人作品（单张图集、88 格、约 10 个状态），
