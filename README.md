@@ -8,8 +8,19 @@
 会和 [DeepSeek Harness](https://github.com/deepseek-ai) 的会话状态联动 ——
 你让它干活它切"忙碌"，干完它蹦一下，出错它叹口气，余额少了它皱眉。
 
-**状态**：个人项目，已在 Windows 10/11 + PyQt5 5.9.2 / 5.15.11 上实测通过
-（16 个 Python 自检 + 6 个 Node 测试全绿）。
+**状态**：个人项目，已在 Windows 10/11 + PyQt5 5.9.2 / 5.15.11 上实测通过。
+自检共 **39 个脚本**（28 个 `selftest_*` + 11 个 `verify_*`），
+`python tools\run_selftests.py` 默认跑其中 31 个（其余需要联网/打包产物，见脚本里的
+`SLOW_OR_ENV`）。
+
+> ### 已经装过了？要看怎么更新 → **[UPDATE.md](UPDATE.md)**
+>
+> 一条命令（`git clone` 拿的）：
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File .\tools\pull.ps1
+> ```
+> **个人配置请写进 `config.user.jsonc`**（复制 [config.user.example.jsonc](config.user.example.jsonc)
+> 开始）—— 它**不进 git**，所以更新时永远不会冲突。
 
 > **关于动画素材**：本仓库**已附带** 106 个 webm 动画源（51.8 MB，来自
 > [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，
@@ -27,6 +38,7 @@
 - [快速开始](#快速开始)
 - [配置](#配置)
 - [更新](#更新)
+- [变更日志](CHANGELOG.md)
 - [架构](#架构)
 - [素材与许可](#素材与许可)
 - [开发](#开发)
@@ -257,7 +269,8 @@ python tools/setup_assets.py --check    # 只检查
 
 ## 更新
 
-**已经装过 / 下载过的人看 [UPDATE.md](UPDATE.md)。**
+**已经装过 / 下载过的人看 [UPDATE.md](UPDATE.md)**，想知道"更新了什么"看
+[CHANGELOG.md](CHANGELOG.md)。
 
 一句话版本（`git clone` 拿的）：
 
