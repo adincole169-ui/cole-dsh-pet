@@ -90,5 +90,46 @@
 
 ---
 
+## 发布流程（维护者用）
+
+发布一次 = **写日志 → 提交 → 打标签 → 推 → 在 GitHub 上建 Release**。
+
+```powershell
+# 1. 把这次的变化写进本文件的 [未发布] 段，然后把它改成新版本号 + 日期
+#    例：## [未发布]  ->  ## [1.1.0] - 2026-10-20
+#    并在文件底部补两行链接引用
+
+# 2. 提交
+git add -A
+git commit -m "发布 1.1.0：<一句话>"
+git push
+
+# 3. 打标签（带注释；注释会自动成为 Release 说明的起点）
+git tag -a v1.1.0 -m "大肥鱼桌宠 1.1.0"
+git push origin v1.1.0
+
+# 4. 在 GitHub 上建 Release（这一步等于"通知关注者"，必须做）
+#    https://github.com/adincole169-ui/cole-dsh-pet/releases/new
+#    - Choose a tag: 选刚推的 v1.1.0
+#    - Release title: 大肥鱼桌宠 1.1.0
+#    - 说明：把本文件对应段落粘进去
+#    - 点 Publish release
+```
+
+**为什么要单独做第 4 步**：只推 tag 的话，它只出现在仓库的 Tags 列表里；
+**只有创建 Release，关注这个仓库的人才会收到通知** —— 那才是"发布"。
+
+**版本号怎么定**（语义化版本）：
+
+| 变化 | 例子 | 版本 |
+|---|---|---|
+| 修 bug、不改行为 | 修好某个动画不播 | 补丁位 `1.0.1` |
+| 加功能、不改已有配置的含义 | 加一个新的帧来源模式 | 次版本 `1.1.0` |
+| 改配置格式 / 破坏兼容 | 改了 `config.jsonc` 的字段名 | 主版本 `2.0.0` |
+
+> 改配置字段名这类破坏性变更，要同时在 [UPDATE.md](UPDATE.md) 里写清"怎么迁移"。
+
+---
+
 [未发布]: https://github.com/adincole169-ui/cole-dsh-pet/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/adincole169-ui/cole-dsh-pet/releases/tag/v1.0.0
