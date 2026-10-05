@@ -61,9 +61,23 @@ _LAST_STAGING = None
 # 变软，而这个观感确实看得出来。640 就是素材原生宽度，不需要额外上采样，所以用它；
 # 代价是缓存 1.5 GB → 2.6 GB。
 TARGET_WIDTH = 640
-# 调色板量化：这套画风是平涂 + 硬边，256 色几乎无损。它只影响颜色数，不影响尺寸，
-# 因此对清晰度没有影响，可以放心保留。
-PALETTE_COLORS = 256
+# 调色板量化：**默认关闭（0）**。
+#
+# 这里原先写着"这套画风是平涂 + 硬边，256 色几乎无损、对清晰度没有影响，可以放心保留"
+# —— **实测证明那句话是错的**（见 tools/probe_quality_loss.py）：
+#
+#     直接解 webm 的一帧     约 4217 色
+#     量化后                 约  249 色
+#     逐像素平均差 2.70/255，最大 47/255，4.65% 的像素差超过 8
+#
+# 而它只省约 14% 的磁盘（640x360：113.5 KB -> 99.2 KB，全量 2.75 -> 2.40 GB）。
+# 用一分可见的画质换七分之一空间，不划算。
+#
+# 更要紧的是：用户反馈"我们的清晰度不如上游"。上游是浏览器直接播 webm，
+# **本来就没有这一步**。关掉它，我们的画面就与上游逐像素一致（只差 VP9 解码本身）。
+#
+# 想省空间就设成 256；0 或负值表示不量化。
+PALETTE_COLORS = 0
 
 
 def ffmpeg_path():
@@ -288,7 +302,17 @@ def _common_crop(paths, sample=24):
 
 
 def _quantize(paths, width):
-    """降采样 → 按共用包围盒裁剪 → 调色板量化，就地替换。"""
+    """降采样 → 按共用包围盒裁剪 → （可选）调色板量化，就地替换。
+
+    **调色板量化默认关闭**，这是实测后的决定：
+      * 它把每帧压到 256 色，而直接解 webm 的一帧有约 4200 色 ——
+        实测逐像素平均差 2.70/255、4.65% 的像素差超过 8，是**可见的画质损失**；
+      * 而它只省约 13~14% 的磁盘（640x360：113.5 KB -> 99.2 KB）。
+      用一分画质换七分之一空间，不值得。上游是浏览器直接播 webm，本来就没有这一步，
+      所以关掉它同时也让我们的画面与上游**逐像素一致**（除了 VP9 解码本身）。
+
+    想省空间再把 `PALETTE_COLORS` 设成 256 即可（`0` 或负值表示不量化）。
+    """
     from PIL import Image
     box = _common_crop(paths)
     for path in paths:
@@ -304,12 +328,15 @@ def _quantize(paths, width):
                         min(image.height, int(box[3] * scale) + 1))
                 if crop[2] - crop[0] > 4 and crop[3] - crop[1] > 4:
                     image = image.crop(crop)
-            # 调色板化保留 alpha：先量化 RGB，再把原 alpha 贴回去。
-            alpha = image.getchannel("A")
-            quantized = image.convert("RGB").quantize(colors=PALETTE_COLORS, method=Image.MEDIANCUT)
-            quantized = quantized.convert("RGBA")
-            quantized.putalpha(alpha)
-            quantized.save(path, "PNG", optimize=True)
+            if PALETTE_COLORS and PALETTE_COLORS > 0:
+                # 调色板化保留 alpha：先量化 RGB，再把原 alpha 贴回去。
+                alpha = image.getchannel("A")
+                quantized = image.convert("RGB").quantize(
+                    colors=PALETTE_COLORS, method=Image.MEDIANCUT)
+                quantized = quantized.convert("RGBA")
+                quantized.putalpha(alpha)
+                image = quantized
+            image.save(path, "PNG", optimize=True)
 
 
 def build(name, width=TARGET_WIDTH, force=False):
@@ -414,15 +441,18 @@ def build_all(width=TARGET_WIDTH, progress=None):
     return done
 
 
-def build_all_parallel(width=TARGET_WIDTH, workers=4, progress=None, names=None):
+def build_all_parallel(width=TARGET_WIDTH, workers=4, progress=None, names=None,
+                       force=False):
     """并行解码动画。
 
-    每个动画都是一次独立的 ffmpeg 进程 + 一次 Pillow 量化，天然可并行。
+    每个动画都是一次独立的 ffmpeg 进程 + 一次 Pillow 处理，天然可并行。
     实测（16 核，6 worker）：串行 27.1 秒/动画 -> 并行 5.8 秒/动画，**提速约 4.7 倍**。
     106 个动画从约 48 分钟降到约 10 分钟。
 
-    参数 `names` 指定要解哪几个（默认全部）。**每个动画仍然写自己的目录**，
-    互不干扰；`progress` 会被串行化调用（加锁），避免多线程同时打印导致输出交错。
+    参数 `names` 指定要解哪几个（默认全部）；`force=True` 时已缓存的也重解
+    （改了 `_quantize` 的处理方式之后，必须用这个才能让旧缓存重新生成）。
+    **每个动画仍然写自己的目录**，互不干扰；`progress` 会被串行化调用（加锁），
+    避免多线程同时打印导致输出交错。
     """
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -439,7 +469,7 @@ def build_all_parallel(width=TARGET_WIDTH, workers=4, progress=None, names=None)
 
     def work(name):
         try:
-            count = build(name, width=width)
+            count = build(name, width=width, force=force)
             outcome = (name, count, "")
         except Exception as error:
             outcome = (name, -1, str(error))

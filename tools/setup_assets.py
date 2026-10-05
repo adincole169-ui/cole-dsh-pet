@@ -126,7 +126,7 @@ def main():
               % (index, count, name[:24], frames, human(elapsed), human(remaining)))
 
     results = pipeline.build_all_parallel(
-        workers=workers, names=pending, progress=progress)
+        workers=workers, names=pending, progress=progress, force=force)
 
     elapsed = time.time() - started
     failed = [item for item in results if item[1] < 0]

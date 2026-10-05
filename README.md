@@ -14,8 +14,9 @@
 > **关于动画素材**：本仓库**已附带** 106 个 webm 动画源（51.8 MB，来自
 > [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，
 > 与上游逐字节相同，已核实）。该项目的许可是「素材允许开源使用、禁止商用、二创须署名」。
-> **解码后的帧不进仓库**（2.56 GB），clone 后用一条命令生成即可 ——
-> 见 [快速开始](#快速开始)，约 10 分钟。
+> **clone 下来就能直接跑**：默认 `frameSource: "stream"` 在播放时用 ffmpeg 流式解码，
+> **磁盘上不留任何帧**。想换成预解码的 PNG 帧（零解码延迟、约 2.6 GB）见
+> [快速开始](#快速开始)。
 
 ---
 
@@ -106,35 +107,51 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### 二、一条命令解码素材（约 10 分钟）
+### 二、素材：不需要任何准备步骤
 
-本仓库**已附带 106 个 webm 动画源**（51.8 MB）。桌宠播放用的是解码后的 PNG 帧，
-所以要先解码一次 —— 就一条命令：
+本仓库**已附带 106 个 webm 动画源**（`webm/`，51.8 MB），**clone 下来就能直接跑** ——
+不再需要"先解码一遍"。
 
-```powershell
-.\.venv\Scripts\python.exe -X utf8 tools\setup_assets.py
-```
+播放时有两条路（`config.jsonc` 的 `frameSource`，默认 `"auto"`）：
 
-它会检查素材与解码器、然后**并行解码全部 106 个动画**，并实时报进度。
-16 核机器实测约 **10 分钟**（串行要 48 分钟）。
+| 值 | 做法 | 磁盘占用 | 首次播放 | 需要 ffmpeg |
+|---|---|---|---|---|
+| `"stream"`（默认，推荐） | 播放时用 ffmpeg **流式解码** webm，不落盘 | **0** | 约 94 ms | **是** |
+| `"cache"` | 预先解码成 `frames/<动画名>/*.png` | 约 2.6 GB | 0（但首次要等约 13 秒解码） | 只在解码时 |
+| `"auto"` | 有 ffmpeg 就 stream，否则 cache | 视情况 | 视情况 | — |
 
-> **解码需要 ffmpeg。** 有两条路：
+**两条路产出的画面逐像素完全相同**（实测最大差 0/255），只是"磁盘空间换运行时解码"的取舍。
+
+> **`stream` 模式需要 ffmpeg。** 两条路：
 > * 你已经装了（`ffmpeg -version` 能跑）→ 直接用，无需额外操作；
-> * 没装 → 装 `imageio-ffmpeg`（会带一个 ffmpeg 进来，不用手动配置）：
+> * 没装 → `winget install Gyan.FFmpeg`，或装 `imageio-ffmpeg`（带一个 ffmpeg 进来）：
 >
 >   ```powershell
 >   .\.venv\Scripts\python.exe -m pip install -r requirements-assets.txt
 >   ```
 >
->   它自带的是较老的 ffmpeg 4.2.2，对某些目录写文件会失败；`asset_pipeline`
->   里做了自动兜底（改用临时目录再搬），已实测**解出的帧与新版 ffmpeg 逐像素一致**。
->   若想更稳，建议装一个较新的 ffmpeg 放进 PATH。
+>   没装也会正常跑 —— 会自动退回 `cache` 模式并在 stderr 说明，只是需要先解码。
 
-先看看会做什么、暂不解码：
+<details>
+<summary>如果你更想用 <code>cache</code> 模式（零解码延迟，但要 2.6 GB）</summary>
+
+```powershell
+# 1) config.jsonc 里把 "frameSource" 改成 "cache"
+# 2) 解码全部 106 个动画（并行，16 核实测约 10 分钟；串行要 48 分钟）
+.\.venv\Scripts\python.exe -X utf8 tools\setup_assets.py
+```
+
+`setup_assets.py` 会检查素材与解码器、然后并行解码全部动画并实时报进度。先看它要做什么：
 
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 tools\setup_assets.py --check
 ```
+
+> **解码用的 ffmpeg**：PATH 里优先，其次 `imageio-ffmpeg` 自带的（较老的 4.2.2，
+> 对某些目录写文件会失败；`asset_pipeline` 里做了临时目录兜底，已实测**解出的帧与
+> 新版 ffmpeg 逐像素一致**）。流式模式不受这个坑影响 —— 它走管道、不写文件。
+
+</details>
 
 ### 三、启动
 
@@ -171,10 +188,10 @@ python -m venv .venv
 
 | 参数 | 作用 |
 |---|---|
-| `--status` | 打印配置与素材统计后退出（不启动、不校验素材） |
-| `--check-assets` | 检查素材是否就绪 |
-| `--predecode` | 预解码常用动画后退出（约 26 个） |
-| `--predecode --all` | 预解码**全部** 106 个动画（新装机建议，之后不会再有"首次播放卡 30 秒"） |
+| `--status` | 打印配置、**帧来源**与素材统计后退出（不启动、不校验素材） |
+| `--check-assets` | 检查素材是否就绪（判据随 `frameSource` 而变） |
+| `--predecode` | **仅 `cache` 模式**：预解码常用动画后退出（约 26 个） |
+| `--predecode --all` | **仅 `cache` 模式**：预解码**全部** 106 个动画 |
 | `--predecode --jobs N` | 指定并行度（默认按 CPU 核数自动决定 2~6；实测 6 路约 4.7 倍速） |
 | `--pet <名字>` | 用一个「种类」覆盖层启动（见 `pet/夜猫-config.json`） |
 | `--anim <名字>` | 直接播指定动画 |
@@ -182,7 +199,8 @@ python -m venv .venv
 | `--force` | 跳过单一实例检查（自检脚本用） |
 | `--allow-multi` | 允许多开 |
 
-一键准备素材（等价于 `--predecode --all`，并会检查解码器）：
+`stream` 模式下 `--predecode` 是**空操作**（会直接告诉你不需要预解码）。
+只有切到 `cache` 模式才需要：
 
 ```powershell
 python tools/setup_assets.py            # 自动并行度
@@ -243,7 +261,8 @@ main.py                 启动、命令行、预解码、素材自检
 src/
   pet.py                窗口绘制、物理、输入掩膜、气泡、通知（约 1300 行）
   animator.py           当前播放、交叉淡化、移动规格、状态机
-  frames.py             帧缓存（LRU + 钉住）、后台解码
+  frames.py             帧来源（stream 流式解码 / cache 预解码 PNG）、LRU + 钉住
+  stream_frames.py      流式解码：常驻 ffmpeg + 环形缓冲 + 按消费位置背压
   config.py             JSONC 解析、分层合并、种类覆盖
   bridge.py             本地 HTTP 显示服务（127.0.0.1:8899）
   chat.py / notify.py / move.py
@@ -288,9 +307,12 @@ pet/                    「种类」覆盖层示例
 **素材是本项目原样使用的**：106 个 webm 与上游同名同内容（抽查逐字节相同，
 可用 `python tools/verify_asset_origin.py` 复核）。
 
-**为什么不把解码帧提交进 git**：解码后有 **2.56 GB / 25423 个文件**，不适合放进仓库
-历史。所以本仓库分发的是 **51.8 MB 的 webm 源**（`webm/`，106 个），
-clone 后用 `python tools/setup_assets.py` 一条命令生成帧缓存（约 10 分钟）。
+**为什么不把解码帧提交进 git**：解码后有 **2.6 GB / 25423 个文件**，不适合放进仓库
+历史。所以本仓库分发的是 **51.8 MB 的 webm 源**（`webm/`，106 个）。
+
+**而且现在默认根本不解码**：`frameSource: "stream"` 在播放时用 ffmpeg 流式解码，
+磁盘上不留帧（实测起流到首帧 94 ms、首帧后每帧 0.6 ms，24fps 的预算 41.7 ms）。
+所以要 2.6 GB 帧缓存的那套只是 `"cache"` 模式的备选，不是必经之路。
 
 **但图标与表情包是随仓库分发的**（`assets/` 4 个、`memes/` 8 个，合计约 790 KB）：
 它们虽然也是从 webm 生成的派生物，但 `assets/icon.ico` 是**运行必需**的——

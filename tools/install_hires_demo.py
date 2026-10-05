@@ -27,6 +27,9 @@ import os
 import shutil
 import sys
 
+import numpy as np
+from PIL import Image
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 HIRES_ROOT = r"E:\dsh\_src\hires"
@@ -123,9 +126,22 @@ def main():
         sx_cx = (new_box[0] + new_box[2] + 1) / 2.0 * scale
         dx = int(round(target_cx - sx_cx))
         dy = int(round(target_bottom - sy1))
-        canvas = Image.new("RGBA", CANVAS, (0, 0, 0, 0))
-        canvas.paste(scaled, (dx, dy), scaled)
-        canvas.save(os.path.join(target, entry), "PNG", optimize=True)
+
+        # **用 numpy 直接放置，不要用 Image.paste(mask=...)**
+        # paste 到全透明画布上时，alpha=0 的位置结果会被写成 (0,0,0,0) ——
+        # 也就是把 alpha bleed 好不容易填好的透明区 RGB 又抹成黑色，
+        # 于是缩放时边缘被插值成暗色（实测边缘均色 65 -> 26）。
+        # 直接赋值能把透明区的 RGB 一并带过来。
+        source = np.asarray(scaled)
+        canvas = np.zeros((CANVAS[1], CANVAS[0], 4), np.uint8)
+        sh, sw = source.shape[0], source.shape[1]
+        # 目标区域与画布求交（允许负偏移/超出）
+        x0, y0 = max(0, dx), max(0, dy)
+        x1, y1 = min(CANVAS[0], dx + sw), min(CANVAS[1], dy + sh)
+        if x1 > x0 and y1 > y0:
+            canvas[y0:y1, x0:x1] = source[y0 - dy:y1 - dy, x0 - dx:x1 - dx]
+        Image.fromarray(canvas, "RGBA").save(os.path.join(target, entry),
+                                             "PNG", optimize=True)
 
     total = sum(os.path.getsize(os.path.join(target, f)) for f in os.listdir(target))
     print()

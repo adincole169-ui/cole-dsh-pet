@@ -1,0 +1,850 @@
+{
+ "三球抛接": {
+  "bytes": 549316,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "下五子棋": {
+  "bytes": 514704,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "东张西望": {
+  "bytes": 427005,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "中秋赏月吃月饼": {
+  "bytes": 512341,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "优雅女仆舞": {
+  "bytes": 578915,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "余额-分文不剩": {
+  "bytes": 490318,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "余额-数金皱眉": {
+  "bytes": 319065,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "余额-袋空如洗": {
+  "bytes": 383104,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "余额-金袋叮当": {
+  "bytes": 530955,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "余额-钱袋如常": {
+  "bytes": 387407,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "余额-钱袋满溢": {
+  "bytes": 622258,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "偷吃零食被抓住": {
+  "bytes": 432201,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "写代码": {
+  "bytes": 383960,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "写福字": {
+  "bytes": 500314,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "凭空生花": {
+  "bytes": 620252,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "动物环绕": {
+  "bytes": 981435,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地专心玩魔方": {
+  "bytes": 442948,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地小憩沉眠": {
+  "bytes": 433769,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地左转奔跑": {
+  "bytes": 614526,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地敲击桌面互动": {
+  "bytes": 403033,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地漂浮踏步": {
+  "bytes": 591446,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地跳跃抓碎头顶物品": {
+  "bytes": 619282,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地蹲下玩玩具汽车": {
+  "bytes": 505114,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "原地重力下蹲压缩": {
+  "bytes": 215047,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "变鸽子": {
+  "bytes": 509462,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "可爱宅舞": {
+  "bytes": 576307,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃Token": {
+  "bytes": 574754,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃冰淇淋融化": {
+  "bytes": 509816,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃午餐": {
+  "bytes": 495122,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃大闸蟹": {
+  "bytes": 545299,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃年糕": {
+  "bytes": 451257,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃早餐": {
+  "bytes": 441484,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃晚餐": {
+  "bytes": 741965,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃汤圆": {
+  "bytes": 437152,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃白饭": {
+  "bytes": 459590,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃粽子": {
+  "bytes": 446268,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃糖葫芦": {
+  "bytes": 469809,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃腊八粥": {
+  "bytes": 460665,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃西瓜": {
+  "bytes": 482918,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃重阳糕": {
+  "bytes": 468951,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃长寿面": {
+  "bytes": 489038,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃青团": {
+  "bytes": 377524,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吃饺子": {
+  "bytes": 554828,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吹气球": {
+  "bytes": 751040,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "吹笛子": {
+  "bytes": 768350,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "哈欠连天": {
+  "bytes": 424352,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "堆雪人": {
+  "bytes": 519196,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "大口吃零食": {
+  "bytes": 806998,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "女仆屈膝礼仪": {
+  "bytes": 365712,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "小幅度原地360度旋转展示": {
+  "bytes": 585715,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "小提琴演奏": {
+  "bytes": 605350,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "工作状态-原地踱步张望": {
+  "bytes": 471725,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "工作状态-垂头叹气冒汗": {
+  "bytes": 198937,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 118,
+  "height": 360,
+  "width": 640
+ },
+ "工作状态-忙碌点按": {
+  "bytes": 475613,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "工作状态-思考冒泡": {
+  "bytes": 408849,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "工作状态-清点归档": {
+  "bytes": 362510,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "工作状态-雀跃庆祝": {
+  "bytes": 488024,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "待机呼吸休闲": {
+  "bytes": 441437,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "悠闲哼歌": {
+  "bytes": 584008,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "扑克魔术": {
+  "bytes": 461997,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "打瞌睡被惊醒": {
+  "bytes": 454028,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "抽陀螺": {
+  "bytes": 521068,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "拆礼物": {
+  "bytes": 517803,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "插茱萸赏菊": {
+  "bytes": 486358,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "摇扇纳凉": {
+  "bytes": 510022,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "撸猫": {
+  "bytes": 348432,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "收红包": {
+  "bytes": 472277,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "放孔明灯": {
+  "bytes": 594144,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "放河灯": {
+  "bytes": 379124,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "放烟花": {
+  "bytes": 1330462,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "放风筝": {
+  "bytes": 770134,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "整体换装试色": {
+  "bytes": 524724,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "是啊，吃什么": {
+  "bytes": 588163,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "晨间刷牙": {
+  "bytes": 425460,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "涮火锅": {
+  "bytes": 466547,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "深度思考碎碎念": {
+  "bytes": 433031,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "点击回应-傲娇生气": {
+  "bytes": 392336,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "点击回应-元气挥手": {
+  "bytes": 421669,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "点击回应-害羞惊讶": {
+  "bytes": 538281,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "点击回应-开心跃动": {
+  "bytes": 538110,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "点击回应-挠痒咯咯笑": {
+  "bytes": 425393,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "照镜子": {
+  "bytes": 504127,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "玩水枪": {
+  "bytes": 523346,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "玩游戏气急败坏": {
+  "bytes": 525022,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "用鲸鱼尾巴拍打地面": {
+  "bytes": 352213,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "碎碎念-发呆碎碎念": {
+  "bytes": 326752,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "碎碎念-对屏碎碎念": {
+  "bytes": 364946,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "碎碎念-擦桌碎碎念": {
+  "bytes": 350436,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "穿针乞巧": {
+  "bytes": 480887,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "舞狮头": {
+  "bytes": 632110,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "荡秋千": {
+  "bytes": 644126,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "萌化小幽灵": {
+  "bytes": 421990,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "蓝鲸现世": {
+  "bytes": 482896,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "蝴蝶蜜蜂环绕头顶开花": {
+  "bytes": 852828,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "螃蟹走路": {
+  "bytes": 596902,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "被吓一跳": {
+  "bytes": 282771,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "被落叶淹没": {
+  "bytes": 766832,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "被鼠标拖拽悬空反馈": {
+  "bytes": 464764,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "装点圣诞树": {
+  "bytes": 818456,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "讨糖南瓜灯": {
+  "bytes": 483293,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "超大伸懒腰": {
+  "bytes": 396987,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "踢毽子": {
+  "bytes": 531015,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "轻快摇摆舞": {
+  "bytes": 542928,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "轻快记录": {
+  "bytes": 447726,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "骑木马": {
+  "bytes": 697580,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ },
+ "鲸鱼吐泡泡特效": {
+  "bytes": 452096,
+  "duration": 0.0,
+  "fps": 24.0,
+  "frames": 241,
+  "height": 360,
+  "width": 640
+ }
+}

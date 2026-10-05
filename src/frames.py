@@ -1,22 +1,33 @@
 # -*- coding: utf-8 -*-
-"""帧存储：按需解码动画、缓存 QPixmap、提供给绘制层。
+"""帧存储：按需准备动画、缓存 QPixmap、提供给绘制层。
+
+**两种帧来源**（由 `FrameStore(source=...)` 选，默认取 `default_source()`）：
+
+* `"stream"` —— 运行时用 ffmpeg 流式解码 webm，**磁盘上不留帧**。一个动画一个常驻
+  ffmpeg 进程，`-stream_loop -1` 无限循环，有界环形缓冲 + 按消费位置背压。
+  代价是首次播放要等约 94 ms（起 ffmpeg 到首帧），需要 ffmpeg。
+* `"cache"` —— 把 webm 预解码成 `frames/<名>/*.png` 再读（历史方案）。
+  零延迟，但本机要有 2.6 GB 缓存，且首次使用某个动画要等约 13 秒解码。
+
+两者产出**逐像素相同**的画面（实测最大差 0/255），所以绘制层不需要区分。
 
 三层结构，各自解决一个具体问题：
 
-* **磁盘层**（asset_pipeline）：webm → PNG 帧，只在某个动画第一次用到时生成；
-* **磁盘到内存**：读 241 张 PNG 需要 300–600 ms，**绝不能放在 GUI 线程里**——第一版
+* **准备层**：stream 模式起 ffmpeg；cache 模式让 asset_pipeline 生成 PNG 帧；
+* **准备到内存**：读 241 张 PNG 需要 300–600 ms，**绝不能放在 GUI 线程里**——第一版
   就是同步读，结果每次切状态界面都要僵住半秒，连健康检查都显示"还在播上一个动画"。
-  因此当缓存未命中时由**后台线程**加载，加载完成后经 `loaded` 信号切回 GUI 线程；
-* **内存层**：按 LRU 淘汰，因为 106 个动画全常驻要几 GB。
+  因此缓存未命中时由**后台线程**准备，完成后经 `loaded` 信号切回 GUI 线程；
+* **内存层**：按 LRU 淘汰，因为 106 个动画全常驻要几 GB。**淘汰时必须释放**
+  （stream 模式要杀掉那个 ffmpeg 进程，否则进程泄漏）。
 
-后台线程与 GUI 线程之间只交换"动画名"，QPixmap 在 GUI 线程里构造（QPixmap 不是
-线程安全的，跨线程只能传路径）。
+后台线程与 GUI 线程之间只交换"动画名"：QPixmap 在 GUI 线程里构造（QPixmap 不是
+线程安全的）；stream 模式的读帧线程只产 QImage（QImage 可以跨线程）。
 """
 
 import os
 import sys
 from collections import deque
-from threading import Thread
+from threading import Lock, Thread
 
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 
@@ -25,6 +36,17 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import asset_pipeline  # noqa: E402
+import stream_frames  # noqa: E402
+
+# 默认帧来源。`"stream"` 让磁盘占用归零；ffmpeg 不可用时自动退回 `"cache"`。
+DEFAULT_SOURCE = "stream"
+
+
+def default_source():
+    """按环境决定默认帧来源。"""
+    if DEFAULT_SOURCE != "stream":
+        return DEFAULT_SOURCE
+    return "stream" if stream_frames.available() else "cache"
 
 
 class Animation(object):
@@ -81,9 +103,9 @@ class FrameStore(QObject):
     # 后台加载失败（参数为动画名）
     failed = pyqtSignal(str)
 
-    def __init__(self, keep=4, parent=None):
+    def __init__(self, keep=4, parent=None, source=None):
         super(FrameStore, self).__init__(parent)
-        self._cache = {}          # name -> Animation
+        self._cache = {}          # name -> Animation / StreamAnimation
         self._order = []          # LRU 顺序，最旧在前
         self._keep = max(1, keep)
         self._loading = set()
@@ -91,9 +113,19 @@ class FrameStore(QObject):
         self._pinned = set()      # 正在播放、不能淘汰的动画
         # 按**钉入顺序**记录，`retain()` 靠它裁掉最旧的。用 set 不行——set 不保序。
         self._pin_order = deque()
+        # stream 模式：后台线程造好的流对象，等 GUI 线程来接手
+        self._streams = {}
+        self._stream_lock = Lock()
+        self.source = source or default_source()
+        self._warm_names = set()
         self.hits = 0
         self.misses = 0
         self.reloads = 0
+        self.stream_failures = 0
+        # `loaded` 一到就把动画登记进 `_cache`：这样 `request()` 之后的
+        # `peek()` 立刻能拿到，预热（`warm()`）也靠它生效。
+        # `finish_load` 是幂等的，动画那边的 `on_loaded` 再调一次也无害。
+        self.loaded.connect(self._register_loaded)
 
     def pin(self, name):
         """钉住一个动画：它是当前正在播的，淘汰它会让画面直接没帧。"""
@@ -177,24 +209,85 @@ class FrameStore(QObject):
         self._loading.add(name)
 
         def worker():
+            ok = True
             try:
-                self._ensure_on_disk(name)
-                ok = True
+                if self.source == "stream":
+                    ok = self._prepare_stream(name)
+                else:
+                    self._ensure_on_disk(name)
             except Exception as error:
-                sys.stderr.write("dsh-pet: 解码失败 %s: %s\n" % (name, error))
+                sys.stderr.write("dsh-pet: 准备失败 %s: %s\n" % (name, error))
                 ok = False
             self._loading.discard(name)
             if ok:
                 self.loaded.emit(name)
             else:
+                self.stream_failures += 1
+                sys.stderr.write("dsh-pet: 取不到帧 %s\n" % name)
                 self.failed.emit(name)
 
         Thread(target=worker, daemon=True).start()
 
+    def _prepare_stream(self, name):
+        """在**后台线程**里起一个流并等首帧就绪。
+
+        等首帧放在后台是必须的：实测起 ffmpeg 到首帧要 94 ms，放 GUI 线程里就是
+        每次切动画都卡一下（和当初"同步读 241 张 PNG 僵半秒"是同一类错误）。
+
+        探测/起流失败时**回退到磁盘缓存**（如果那份还在）：这样即使某台机器上
+        ffmpeg 有问题，只要之前解过码就还能用，不会变成"宠物不见了"。
+        """
+        with self._stream_lock:
+            if name in self._streams:
+                return True
+        info = stream_frames.webm_info(name)
+        if not info:
+            if asset_pipeline.is_cached(name):
+                self._ensure_on_disk(name)
+                return True
+            sys.stderr.write("dsh-pet: 没有这个动画: %s\n" % name)
+            return False
+        animation = None
+        try:
+            animation = stream_frames.StreamAnimation(name, info)
+            if not animation.wait_first(6.0):
+                reason = animation.error or "首帧超时"
+                animation.close()
+                if asset_pipeline.is_cached(name):
+                    sys.stderr.write("dsh-pet: 流式失败(%s)，回退到磁盘缓存 %s\n"
+                                     % (reason, name))
+                    self._ensure_on_disk(name)
+                    return True
+                sys.stderr.write("dsh-pet: 流式失败 %s: %s\n" % (name, reason))
+                return False
+        except Exception as error:
+            if animation is not None:
+                animation.close()
+            if asset_pipeline.is_cached(name):
+                self._ensure_on_disk(name)
+                return True
+            sys.stderr.write("dsh-pet: 起流失败 %s: %s\n" % (name, error))
+            return False
+        with self._stream_lock:
+            self._streams[name] = animation
+        return True
+
+    def _register_loaded(self, name):
+        """`loaded` 一到就登记进 `_cache`（GUI 线程）。"""
+        self.finish_load(name)
+
     def finish_load(self, name):
-        """在 **GUI 线程**里把后台准备好的路径登记成一个惰性动画。"""
+        """在 **GUI 线程**里把后台准备好的东西登记成一个动画对象。"""
         if name in self._cache:
             return self._cache[name]
+        if self.source == "stream":
+            with self._stream_lock:
+                animation = self._streams.pop(name, None)
+            if animation is not None:
+                self._cache[name] = animation
+                self._touch(name)
+                self.reloads += 1
+                return animation
         paths = asset_pipeline.cached_frames(name)
         if not paths:
             return None
@@ -203,6 +296,20 @@ class FrameStore(QObject):
         self._touch(name)
         self.reloads += 1
         return animation
+
+    @staticmethod
+    def _release(animation):
+        """淘汰/清空时必须释放：stream 模式要杀掉那个 ffmpeg 进程。
+
+        漏掉这一步的后果是**进程泄漏** —— 每换一个动画留一个 ffmpeg，
+        聊一会儿就有几十个。所以这里用鸭子类型判断，不依赖具体类。
+        """
+        closer = getattr(animation, "close", None)
+        if callable(closer):
+            try:
+                closer()
+            except Exception:
+                pass
 
     # -- 内部 ---------------------------------------------------------------- #
     def _ensure_on_disk(self, name):
@@ -213,15 +320,27 @@ class FrameStore(QObject):
         self._disk_ready.add(name)
 
     def _load_sync(self, name):
+        """同步取一个动画（**会阻塞**，只在启动预解码/自检里用）。
+
+        **stream 模式下也必须走 `_prepare_stream`**：早先这里只调
+        `_ensure_on_disk`，于是流式模式下任何 `store.animation(name)` 都会去
+        **解码写盘** —— 自检里 8 个动画就写出 560 MB 缓存，而且每个要等约 13 秒
+        （实测 selftest_crossfade 因此从 0.3 秒涨到 114 秒）。流式模式的"零磁盘占用"
+        会被这一处悄悄破坏。
+        """
         if name in self._cache:
             self.hits += 1
             self._touch(name)
             return self._cache[name]
         self.misses += 1
         try:
-            self._ensure_on_disk(name)
+            if self.source == "stream":
+                if not self._prepare_stream(name):
+                    return None
+            else:
+                self._ensure_on_disk(name)
         except Exception as error:
-            sys.stderr.write("dsh-pet: 解码失败 %s: %s\n" % (name, error))
+            sys.stderr.write("dsh-pet: 准备失败 %s: %s\n" % (name, error))
             return None
         return self.finish_load(name)
     def _touch(self, name):
@@ -239,12 +358,32 @@ class FrameStore(QObject):
                 index += 1
                 continue
             self._order.pop(index)
-            self._cache.pop(candidate, None)
+            self._release(self._cache.pop(candidate, None))
             over -= 1
 
     # -- 批量 ---------------------------------------------------------------- #
+    def warm(self, names):
+        """**非阻塞**地把最可能最先用到的几个动画起好流。
+
+        用在启动时：这样宠物出现时帧已经就绪，不必先空白约 100 ms 再显示。
+        cache 模式下就是普通的预解码。
+        """
+        for name in list(names or [])[:2]:
+            if name and name not in self._cache and name not in self._loading:
+                if name in self._warm_names:
+                    continue
+                self._warm_names.add(name)
+                self._start_background(name)
+
     def preload(self, names):
-        """只保证帧在磁盘上（不造 QPixmap，那要几秒）。"""
+        """让帧"准备好"（stream 模式只预热最前面一两个，其余按需）。
+
+        cache 模式原本是"只保证帧在磁盘上（不造 QPixmap，那要几秒）"。
+        stream 模式不需要落盘，所以这里退化成启动预热。
+        """
+        if self.source == "stream":
+            self.warm(names)
+            return
         for name in names:
             if name in self._cache:
                 continue
@@ -255,14 +394,28 @@ class FrameStore(QObject):
             self.finish_load(name)
 
     def clear(self):
+        for animation in list(self._cache.values()):
+            self._release(animation)
         self._cache.clear()
         self._order = []
+        with self._stream_lock:
+            pending = list(self._streams.values())
+            self._streams.clear()
+        for animation in pending:
+            self._release(animation)
+
+    def close(self):
+        """退出时收干净：杀掉所有还在跑的 ffmpeg。"""
+        self.clear()
+        stream_frames.kill_all()
 
     def stats(self):
         return {
+            "source": self.source,
             "cached": list(self._order),
             "hits": self.hits,
             "misses": self.misses,
             "reloads": self.reloads,
+            "streamFailures": self.stream_failures,
             "loading": sorted(self._loading),
         }

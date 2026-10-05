@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import QApplication
 
 from config import load, pet_configs, pet_configs_for_species, species_names
 from frames import FrameStore
+import stream_frames
 from pet import PetWindow
 
 
@@ -48,6 +49,17 @@ def _status():
     print("可用种类: %s" % (", ".join(names) if names else "(无，放 pet/<名字>-config.json 即可新增)"))
     if species:
         print("当前种类: %s" % species)
+    # 帧来源要报出来：stream / cache 决定了"本机该不该有 2.6 GB 的 frames/ 缓存"，
+    # 也是排查"为什么磁盘没变小 / 为什么首次播放要等一下"的第一手信息。
+    source = resolve_frame_source(config)
+    info = check_assets()
+    print("帧来源: %s（%s）" % (source, {
+        "stream": "运行时流式解码，磁盘零占用" if source == "stream"
+                  else "运行时流式解码",
+        "cache": "预解码的 PNG 帧缓存",
+    }.get(source, source)))
+    print("  可用 webm: %d 个；解码帧缓存: %d 个" % (info["webm"], info["cached"]))
+    print("  ffmpeg: %s" % (stream_frames.ffmpeg_path() or "**找不到**"))
     print("配置里的宠物: %d 只" % len(entries))
     for pet_config in entries:
         # 内部物种名（name）与给用户看的名字（displayName）**都打出来**：
@@ -81,7 +93,17 @@ def _predecode(entries, store, all_animations=False, jobs=None):
 
     **并行解码**：每个动画是一次独立 ffmpeg 进程，天然可并行。实测 6 worker
     比串行快约 4.7 倍（27.1 秒/动画 -> 5.8 秒/动画），106 个从约 48 分钟降到约 10 分钟。
+
+    **stream 模式下这个是空操作**：流式播放本来就不需要预解码，也就没有"首次卡顿"
+    要消除（首次约 94 ms）。这里必须显式跳过并说明，否则用户会按提示白跑十分钟。
     """
+    if getattr(store, "source", "cache") == "stream":
+        print("帧来源是 stream（运行时流式解码），**不需要预解码**。")
+        print("  webm 素材已在 webm/，播放时按需解码，磁盘上不留帧。")
+        print("  想改成预解码模式：config.jsonc 里把 frameSource 设为 \"cache\"，")
+        print("  再运行 python tools/setup_assets.py --all")
+        return []
+
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import asset_pipeline
 
@@ -160,6 +182,35 @@ def existing_instance(port):
             return json.loads(response.read().decode("utf-8"))
     except Exception:
         return None
+
+
+def resolve_frame_source(config):
+    """决定帧来源：配置优先，其次按环境自动判断。
+
+    `config.jsonc` 里的 `frameSource`：
+
+    * `"stream"` —— 运行时 ffmpeg 流式解码，**磁盘零占用**，首次播放等约 94 ms；
+    * `"cache"`  —— 用预解码的 `frames/<名>/*.png`，零延迟，但要 2.6 GB 缓存；
+    * `"auto"` 或缺省 —— 有 ffmpeg 就用 stream，没有就 cache。
+
+    **配置要求 stream 但没有 ffmpeg 时必须明确告知并退回**，不能静默降级：
+    否则用户会以为"改成流式了、磁盘该清空"，实际还在用缓存，白折腾一轮。
+    """
+    wanted = config.get("frameSource")
+    wanted = wanted.strip().lower() if isinstance(wanted, str) else "auto"
+    has_ffmpeg = stream_frames.available()
+    if wanted == "cache":
+        return "cache"
+    if wanted == "stream":
+        if not has_ffmpeg:
+            sys.stderr.write(
+                "dsh-pet: 配置要求 frameSource=stream，但找不到 ffmpeg —— "
+                "已退回 cache 模式（预解码的 PNG 帧）。\n"
+                "         装一个即可启用流式：winget install Gyan.FFmpeg\n"
+                "         （或 pip install imageio-ffmpeg）\n")
+            return "cache"
+        return "stream"
+    return "stream" if has_ffmpeg else "cache"
 
 
 def check_assets():
@@ -255,6 +306,10 @@ def main():
     bridge_config = config.get("bridge") if isinstance(config.get("bridge"), dict) else {}
     port = bridge_config.get("port") if isinstance(bridge_config.get("port"), int) else 8899
 
+    # 帧来源：`"stream"`（运行时 ffmpeg 流式解码，磁盘零占用）或 `"cache"`（预解码 PNG）。
+    # 配置里写 "auto" 或缺省时按环境决定（有 ffmpeg 就用流式）。
+    frame_source = resolve_frame_source(config)
+
     # 已经有活着的实例就不开新窗。`--allow-multi` 可强制再开（多开测试用）；
     # `--force` 给自检脚本；`--predecode` 只是解码素材、根本不开窗，也不该被挡。
     alive = existing_instance(port)
@@ -269,18 +324,24 @@ def main():
     if "--status" not in sys.argv and "--predecode" not in sys.argv:
         info = check_assets()
 
-        # **没有解码帧就不能开窗**。判据只看 `cached`，不看 webm：
-        # 自从仓库附带 webm 之后，"有 webm、没帧"就是 clone 下来最常见的初始状态，
-        # 而它同样跑不起来（无帧 → Qt 回调里抛异常 → 0xC0000409 静默闪退）。
-        # 早先写成 `cached == 0 and webm == 0`，恰好漏掉了这个最常见的情形——实测
-        # 会直接去启动一只没有帧的桌宠，然后无声退出。
-        if info["cached"] == 0:
+        # **没有可播的动画源就不能开窗**。判据随帧来源而变：
+        #   * stream 模式看 `webm` —— 磁盘缓存**本来就是 0**，用 cached 判会把
+        #     流式模式永久挡在门外（这正是换帧来源后最容易漏掉的一处）；
+        #   * cache 模式看 `cached` —— 仓库附带 webm，但"有 webm、没帧"是 clone
+        #     下来最常见的初始状态，它同样跑不起来（无帧 → Qt 回调抛异常 →
+        #     0xC0000409 静默闪退）。早先写成 `cached == 0 and webm == 0`，恰好漏掉
+        #     这个最常见的情形——实测会直接去启动一只没有帧的桌宠，然后无声退出。
+        if frame_source == "stream":
+            if info["webm"] == 0:
+                report_missing_assets(info)
+                return 1
+        elif info["cached"] == 0:
             report_missing_assets(info)
             return 1
 
         if "--check-assets" in sys.argv:
-            print("素材就绪：%d 个 webm，%d 个动画已有解码帧"
-                  % (info["webm"], info["cached"]))
+            print("素材就绪：%d 个 webm，%d 个动画已有解码帧，帧来源 %s"
+                  % (info["webm"], info["cached"], frame_source))
             return 0
 
     species = _pick_species(sys.argv)
@@ -291,7 +352,7 @@ def main():
     # 桌宠自己写的日志（碎碎念逐步流水）也要清理：这几行是**进程内**追加的，
     # 包装层 run_logged.py 管不到它。放在启动时，不必新增定时器。
     _trim_own_logs()
-    store = FrameStore(keep=6)
+    store = FrameStore(keep=6, source=frame_source)
     pets = []
     for pet_config in entries:
         if pet_config.display == "none":
@@ -376,6 +437,11 @@ def main():
         QTimer.singleShot(int(seconds * 1000), app.quit)
     elif "--anim" in sys.argv:
         QTimer.singleShot(2500, app.quit)
+
+    # 退出时收干净：stream 模式下每个动画都挂着一个 ffmpeg 进程，
+    # 漏掉这一步退出后会留下几十个 ffmpeg（`stream_frames` 另有 atexit 兜底，
+    # 但正常退出路径应该显式做）。
+    app.aboutToQuit.connect(store.close)
 
     return app.exec_()
 

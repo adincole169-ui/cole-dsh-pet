@@ -115,16 +115,28 @@
 
 ## 六、怎么准备素材
 
-**本仓库已附带 106 个 webm 源**（`webm/`，51.8 MB），所以正常情况下你只需解码一次：
+**本仓库已附带 106 个 webm 源**（`webm/`，51.8 MB），**clone 下来就能直接跑** ——
+默认是 `stream` 模式（`config.jsonc` 的 `frameSource`），播放时用 ffmpeg 流式解码，
+**磁盘上不留帧**，不需要任何准备步骤：
+
+```powershell
+python -X utf8 main.py
+```
+
+它需要 ffmpeg 在 PATH 里（或装 `imageio-ffmpeg`，见 `requirements-assets.txt`）。
+没装也不会坏：会自动退回 `cache` 模式并在 stderr 说明。
+
+### 如果你想用 `cache` 模式（预解码成 PNG，约 2.6 GB）
+
+把 `config.jsonc` 的 `frameSource` 改成 `"cache"`，然后解码一次：
 
 ```powershell
 python tools/setup_assets.py          # 并行解码全部动画，约 10 分钟
 python tools/setup_assets.py --check  # 只检查依赖与进度
 ```
 
-解码需要 ffmpeg（PATH 里优先，其次 `imageio-ffmpeg` 自带的，见
-`requirements-assets.txt`）。解码后的帧在 `frames/`，**不进 git** ——
-它可由 webm 随时重新生成。
+解码后的帧在 `frames/`，**不进 git** —— 它可由 webm 随时重新生成。
+**两种模式产出的画面逐像素相同**（实测最大差 0/255），区别只在磁盘、依赖与首帧延迟。
 
 ### 方式 A：重新取上游素材（本仓库已附带，一般用不到）
 
@@ -133,7 +145,14 @@ python tools/setup_assets.py --check  # 只检查依赖与进度
 1. 从 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 取
    `dsh-pet/assets/webm/` 下的 webm，或装它的 npm 包
 2. 覆盖本项目的 `webm/`
-3. 重新解码：
+3. 刷新帧数元数据（`stream` 模式需要它来算循环长度；缺了会自动探测但慢一点）：
+
+```powershell
+python tools/build_webm_meta.py
+python main.py
+```
+
+`cache` 模式则改成重新解码：
 
 ```powershell
 python tools/setup_assets.py --force   # 强制重解

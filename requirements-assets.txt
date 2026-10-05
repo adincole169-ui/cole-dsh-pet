@@ -1,21 +1,34 @@
 # 「从源码跑」时才需要的依赖
 #
-# 桌宠**运行**只需要 PyQt5（见 requirements.txt）。
-# 但如果你是从源码 clone 下来的，还需要先把 webm 解码成 PNG 帧 —— 那要 ffmpeg。
+# 桌宠**运行**需要 PyQt5（见 requirements.txt）。
+# 帧从哪来，有两种模式（config.jsonc 的 frameSource）：
+#
+#   * "stream"（默认）—— 播放时用 ffmpeg **流式解码** webm，磁盘上不留帧。
+#                        所以**运行时就需要 ffmpeg**（不需要 Pillow）。
+#   * "cache"         —— 预先解码成 frames/<名>/*.png。运行时不需要 ffmpeg，
+#                        但**解码那一次**要它。
+#
+# 换句话说：不管你选哪种，**从源码 clone 下来都需要 ffmpeg**（除非你已经有现成的帧缓存）。
 #
 # 有两条路拿到 ffmpeg：
 #   1. 自己装一个（推荐，用较新的版本）：https://ffmpeg.org/download.html
-#      装好后确认 `ffmpeg -version` 在 PATH 里能跑；
+#      或 `winget install Gyan.FFmpeg`。装好后确认 `ffmpeg -version` 在 PATH 里能跑；
 #   2. 装下面这个包 —— 它会带一个 ffmpeg 二进制进来（约 62 MB），免手动安装。
 #
 #     python -m pip install -r requirements-assets.txt
 #
-# 装完跑一键准备：
-#     python tools/setup_assets.py
+# 装完直接启动即可（stream 模式不需要任何准备步骤）：
+#     python -X utf8 main.py
 #
-# 说明：下面这个包自带的是 ffmpeg 4.2.2（2019 年）。实测它在本项目的
-# `frames/<中文名>/` 目录下**直接写文件会失败**，所以 asset_pipeline 里做了兜底
+# 若改用 cache 模式，再跑一次解码：
+#     python tools/setup_assets.py            # 全部 106 个，约 10 分钟
+#     python tools/setup_assets.py --check    # 只检查依赖与进度
+#
+# 说明：下面这个包自带的是 ffmpeg 4.2.2（2019 年）。实测它在 cache 模式下往
+# `frames/<中文名>/` **直接写文件会失败**，所以 asset_pipeline 里做了兜底
 # （先解到 ASCII 临时目录再搬）。兜底已实测有效，但如果你已经有较新的 ffmpeg，
 # 优先让它走 PATH —— 那条路径更直接。
+#
+# **stream 模式不受这个坑影响**：它把帧走管道读进内存，根本不写文件。
 
 imageio-ffmpeg>=0.4.9

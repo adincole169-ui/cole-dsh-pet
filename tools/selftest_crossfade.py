@@ -54,7 +54,12 @@ def mean_alpha(window):
 def main(argv):
     app = build_app([argv[0]])
     entries = pet_configs(load())
-    store = FrameStore(keep=6)
+    # `keep` 必须**大于候选数**：这个自检一次预取 8 个候选，若 keep 小于它，
+    # 后取到的会把先取到的按 LRU 逐出，于是后面 `play(候选[0])` 时 `peek` 返回 None，
+    # 转成"异步加载中"——而本自检的 tick 之间没有 sleep（微秒级），来不及就绪，
+    # 量到的基线就是 0.0。缓存模式下这步几乎瞬时（只是 stat 一下），流式模式要
+    # 约 94 ms 起流，所以才暴露出来。本自检量的是**淡化**，不是加载，故预取足量。
+    store = FrameStore(keep=12)
     window = PetWindow(entries[0], store)
     window.show()
 

@@ -22,8 +22,10 @@
 而原插件要求 `^0.2.0-rc.1`，装不上。
 （现在本机已升到 `0.2.0-rc.2`，两边版本都对得上了，只是实现路线不同。）
 
-运行时只依赖 **PyQt5**（numpy 可选）；帧素材随包提供，因此**不需要 ffmpeg 与 Pillow**。
-见 [第 18 条](#18-打包分发两个包一个安装脚本)。
+运行时依赖 **PyQt5**（必需）；**ffmpeg 在 `stream` 模式下必需**（默认就是它），
+`cache` 模式下不需要（帧已解好）；numpy / Pillow 只在自检与解码工具里用。
+见 [第 18 条](#18-打包分发两个包一个安装脚本) 与
+[帧来源](#帧来源stream-与-cache)。
 
 ---
 
@@ -88,7 +90,8 @@ src/move.py              移动规格（配置层与动画层共用，不依赖 
 src/bridge.py            桌宠自己的 HTTP 服务（收 mood / say / anim）
 src/chat.py              对话客户端（主动去问 DSH 插件的模型服务）
 src/notify.py            Windows 原生通知（PowerShell，零依赖）
-tools/asset_pipeline.py  webm → PNG 帧缓存（**透明通道的关键在这**）
+tools/asset_pipeline.py  webm → PNG 帧缓存（`cache` 模式用；**透明通道的关键在这**）
+src/stream_frames.py     流式解码（`stream` 模式，默认）：常驻 ffmpeg + 环形缓冲
 tools/autostart.py       开机自启
 tools/make_memes.py      生成占位表情包
 tools/test_bridge_plugin.mjs  插件事件映射测试（mock 上下文）
@@ -174,7 +177,7 @@ pythonw.exe -X utf8 main.py --pet 我的猫
 
 ---
 
-## 踩过的坑（25 条）
+## 踩过的坑（27 条）
 
 前三条都是"看起来该对、实际不对"，而且症状都不指向真正的原因。
 
@@ -539,20 +542,28 @@ idle + categories + move，**漏了 turn**；而唯一会播它的 `Animator.fac
 
 ### 18. 打包分发：两个包，一个安装脚本
 
-目标：把一个 zip 发给别人，对方解压后跑一个脚本就能用。关键结论先行——
-**运行时只需要 PyQt5**，不需要 ffmpeg、不需要 Pillow、不需要 npm。
+目标：把一个 zip 发给别人，对方解压后跑一个脚本就能用。
 
-#### 为什么能这么简单：把帧一起发
+#### 帧来源变过：现在是"流式解码"，不再必须带 2.6 GB 帧
 
-`frames\` 是 `webm` 用 ffmpeg 解出来的 241×106 张 PNG，约 2GB。带上它之后：
+**2026 年的这次改动**：默认帧来源从"预解码 PNG 缓存"改成**运行时 ffmpeg 流式解码**
+（`stream_frames.py`）。理由与数据见 [帧来源](#帧来源stream-与-cache) 一节。
 
-| | 带帧（默认） | 不带帧（`-SkipFrames`） |
+对打包的影响，也因此有了第二种选择：
+
+| | 带帧（`cache` 模式） | 流式（`stream` 模式，新） |
 |---|---|---|
-| 包大小 | 约 2.1 GB | 约 57 MB |
-| 对方需要装 | **只要 PyQt5** | PyQt5 + Pillow + ffmpeg（还要进 PATH） |
-| 首次播新动画 | 立刻 | 现场解码约 20 秒，且会先播错动作 |
+| 包大小 | 约 2.1 GB | **约 115 MB**（webm 52 + ffmpeg 62） |
+| 对方需要装 | **只要 PyQt5** | PyQt5 + ffmpeg |
+| 首次播新动画 | 立刻 | 约 94 ms |
+| 磁盘常驻 | 2.6 GB | **0** |
+| 画质 | 与流式逐像素相同 | 与带帧逐像素相同 |
 
-所以默认带帧——2GB 换掉"对方要装 ffmpeg 且每个新动画等 20 秒"，值得。
+**两种模式产出的画面逐像素完全相同**（实测最大差 0/255），所以这是纯粹的
+"磁盘空间 / 依赖 / 首帧延迟"三者取舍，不是画质取舍。
+
+`install.ps1` 的 `-SkipFrames` 与默认路径沿用"带帧"（对使用者依赖最少）；
+但**源码 clone 的路径（GitHub）现在默认走流式**，不再需要跑解码命令。
 
 #### 兼容性是在隔离环境里实测过的
 
@@ -934,7 +945,79 @@ return QIcon()                      # 两个都没有 -> 空图标，且不报�
 1. **判断文件该不该进仓库，要同时问"运行时要不要它"**，不能只看是不是派生物；
 2. **"打印检查结果"不等于"检查"**——没有断言的输出，在出问题时和没检查一样。
 
-### 诊断"宠物不见了"
+### 26. 帧来源改成"运行时流式解码"：磁盘 2.6 GB → 0
+
+**背景**：上游 dsh-pet 让浏览器/Electron 的 `<video>` 直接播透明 VP9 的 webm，
+GPU 解码、不落盘，所以整个插件只有 62 MB。我们做不到——Qt 的 `QVideoWidget`
+是**不透明**的原生窗口，不合成 VP9 的独立 alpha 流；本机的 PyQt5 5.9.2 连
+QtMultimedia 都没有。所以历史上只能把每个动画解成 241 张 PNG，
+于是本机多出 **2.68 GB / 25423 个文件**的帧缓存。
+
+**但"不解码"不是唯一出路**：可以**运行时流式解码，不写磁盘**。
+
+#### 动手前先验证的三件事（都实测过，不是推断）
+
+| 假设 | 结论 |
+|---|---|
+| `-stream_loop -1` 能用在带 alpha 的 VP9 上 | **能**。读 249 帧，第 241 帧与第 0 帧**逐字节相同** —— 所以循环播放不需要重起进程 |
+| 流式像素与磁盘 PNG 缓存一致 | **逐像素相同**（最大差 **0/255**）。换帧来源不改变画面 |
+| 帧数能准确拿到 | `ffprobe -count_frames` = 241 = 磁盘 PNG 数。但每次要解码全片（0.2 秒），所以**预生成 `webm-meta.json`**（14 KB，106 个动画）随仓库分发 |
+
+实测开销（`tools/probe_stream_decode.py`）：**起 ffmpeg 到首帧 94 ms，
+首帧之后每帧 0.6 ms** —— 24fps 的预算是 41.7 ms，余量约 **70 倍**。
+
+#### 三个设计要点
+
+**① 背压必须挂钩"消费位置"，不能只看缓冲满没满。**
+生产者比消费者快 70 倍。若只按"缓冲容量"限流，它会一口气跑到第 200 帧，
+而消费者要的第 10 帧**早已被覆盖**。所以生产者每轮检查
+`已写序号 - 消费位置 >= LOOKAHEAD` 就等，把内存钉在
+`LOOKAHEAD × 900 KB`（16 帧 ≈ 14 MB/动画）而不是整段 217 MB。
+
+**② 只跨线程传 `QImage`，不传 `QPixmap`。**
+`QPixmap` 不是线程安全的（而且**没有 QApplication 时创建它会直接中止进程**，
+连报错都不给——自检第一版就"没有任何输出"）。读帧线程产 `QImage`，
+`frame()` 在 GUI 线程转 `QPixmap` 并缓存最近一张。
+
+**③ 进程必须收干净。**
+模块级登记所有存活进程；`close()` / `atexit` / 淘汰 / `clear()` 都会杀；
+Windows 上加 `CREATE_NO_WINDOW` 免得每起一个 ffmpeg 就闪一个黑框。
+漏掉淘汰那一步的后果是**进程泄漏**：每换一个动画留一个 ffmpeg。
+
+#### 与既有状态机的接法：几乎不用改 `pet.py`
+
+关键发现是 `Playing.frame()` 本来就有这个结构：
+
+```python
+source = self.source
+if source is not None and len(source):
+    return source.frame(self.frame_index())
+return self.outgoing          # 上一段的最后一帧
+```
+
+所以**在首帧就绪之前不让动画对象进入 store**，就自动复用了现成的
+"先切状态、后到位"机制：`play()` 时 `peek` 拿不到 → `playing.animation = None`
+→ 继续画上一段（`fallback`）→ 后台线程起流并等首帧 → `loaded` 信号
+→ `on_loaded` 接上并把 `elapsed` 归零。绘制层一行没改。
+
+### 27. `_load_sync` 漏改会让"零磁盘占用"**悄悄失效**
+
+换完帧来源、实机跑通、删掉 2.6 GB 缓存都没问题，但跑自检时发现
+`selftest_crossfade` 从 **0.3 秒涨到 113.9 秒**，而且 `frames/` 里
+**又出现了 564 MB**。
+
+原因：`FrameStore` 有两条取帧入口——`request()`（异步，走 `_start_background`）
+和 `animation()`（同步，走 `_load_sync`）。改的时候只把前者分了流，
+`_load_sync` 仍然直接调 `_ensure_on_disk()` → `asset_pipeline.build()` →
+**解码写盘**。于是任何用 `store.animation(name)` 的地方都会把缓存建回来，
+每个动画还要等约 13 秒。
+
+它特别隐蔽的地方在于：**异步路径改对了，桌宠本体跑起来完全正常**
+（运行时走的是 `request()`），只有自检和启动预解码这类同步入口会中招。
+
+教训：**改"后端"时要先列出这个类的所有入口**，别只改最显眼那条。
+`tools/selftest_stream_runtime.py` 现在会断言"跑完之后 `frames/` 仍不存在"。
+
 
 启动时加 `--watch`，会每秒往 `logs/watch.log` 记一行位置/可见性/动画名：
 
@@ -978,10 +1061,14 @@ pythonw -X utf8 main.py --watch
 
 ### 换成自己的美术
 
-- **动画**：`webm/<动画名>.webm` 放透明 webm，配置里引用那个名字即可；帧缓存
-  （`frames/`）可以整体删掉，下次播放会重新生成。
+- **动画**：`webm/<动画名>.webm` 放透明 webm，配置里引用那个名字即可。
+  `stream` 模式下**不需要任何后续步骤**（帧信息缺失时会自动用 ffprobe 探测一次）；
+  `cache` 模式下 `frames/` 可以整体删掉，下次播放会重新生成。
+  新增一批 webm 后建议跑一次 `python tools/build_webm_meta.py` 把帧数元数据补齐
+  （省掉运行时 0.2 秒/动画的探测）。
 - **表情包**：`memes/<名字>.png`，名字要和 `tools/make_memes.py` 或插件里的列表对得上。
-- 想要更高/更低清晰度：改 `tools/asset_pipeline.py` 的 `TARGET_WIDTH`，然后
+- 想要更高/更低清晰度：这只影响 `cache` 模式的帧缓存大小。改
+  `tools/asset_pipeline.py` 的 `TARGET_WIDTH`，然后
   `python tools/asset_pipeline.py clean` 再重新生成。当前值 **640**：
 
   | 值 | 全量帧缓存 | 按 640 显示时 |
@@ -990,7 +1077,7 @@ pythonw -X utf8 main.py --watch
   | 480（曾用过） | 约 1.5 GB | 放大 1.33 倍，肉眼几乎无差 |
   | 320 | 约 0.7 GB | 放大 2 倍，明显发糊 |
 
-  这是"清晰度 / 磁盘"的唯一取舍点，与其余功能无关。
+  **`stream` 模式不受这张表影响**：它按 webm 原生分辨率解码，磁盘始终为 0。
   改完记得同步 `tools/setup_assets.py` 与 README 里的体积说法。
 - **表情包**：`memes/<名字>.png`。图片清单由桌宠读目录得到并随请求发给插件，所以
   加一张图不用改插件。
