@@ -222,9 +222,26 @@
       "点击回应-元气挥手"
     ],
     // 移动动画池：default 是每个动作都用的默认参数；actions 里每项可覆盖部分参数，
-    // 未写的字段取 default。minDist/maxDist=单次行进距离(px)——以「基准宠物宽 462px」为准，
-    //   运行时按 实际size/462 等比缩放（小宠物挪小步、大宠物挪大步，与人物大小匹配）；
-    // margin=贴边安全距(px，不随缩放)、leadSec/tailSec=动画首尾各多少秒原地不动。
+    // 未写的字段取 default。minDist/maxDist=单次行进距离(px)；
+    // margin=贴边安全距(px)、leadSec/tailSec=动画首尾各多少秒原地不动。
+    //
+    // ===================== 位移规则（重要） =====================
+    // **只有写在这个 `actions` 列表里的动作，才会让宠物真的移动。**
+    // 其余所有动作（idle / 点击 / 各类小动作 / 工作状态…）都**严格待在原地**播放。
+    // 想加一个"会走"的动作，就把它加进这里。
+    //
+    // 想让**部分动作也能有位移、但慢一点**：把那个动作也加进 `actions`，
+    // 并给它一个较短的 minDist/maxDist 和一个小于 1 的 `speedScale`：
+    //
+    //   { "name": "悠闲哼歌", "params": { "minDist": 15, "maxDist": 45,
+    //                                     "speedScale": 0.3,      // 走路速度的 30%
+    //                                     "leadSec": 3, "tailSec": 3 } }
+    //
+    // `speedScale` 默认 1.0（= 走路速度 120 px/s）。0.3 就是"慢慢挪"。
+    // 配合较大的 leadSec/tailSec，可以让它只在中段慢慢漂、前后不动。
+    //
+    // 说明：`actions` 里的动作**不会**出现在 categories 的随机池里（它们由移动档
+    // 的权重抽），所以想让它偶尔出现就调 `animationWeights.move`。
     "moves": {
       "default": { "minDist": 60, "maxDist": 240, "margin": 20, "leadSec": 2, "tailSec": 2 },
       "actions": [

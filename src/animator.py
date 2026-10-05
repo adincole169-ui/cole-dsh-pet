@@ -22,6 +22,18 @@ from move import MoveSpec
 
 FPS_FALLBACK = 24.0
 
+# 移动动画的基准速度（px/秒）。
+#
+# 每个动作可以用 `moves.actions[].params.speedScale` 在此基础上调快慢 —— 那条
+# 路径就是"部分动作也可以有位移，但速度慢一点"（见 move.MoveSpec.speed_scale）。
+#
+# **注意**：`config.jsonc` 里 `moves` 那段的注释说 minDist/maxDist 会"运行时按
+# 实际size/462 等比缩放"，但代码里**没有这回事** —— `MoveSpec.distance()` 返回的
+# 就是原始像素、`config.move_specs()` 也不做缩放。所以那个说法目前是错的；
+# 本常量同理，是绝对像素而不是按尺寸归一的。要真的按宠物大小缩放，得在这里
+# （以及 distance 那一侧）乘上 `config.size / 462.0`。
+MOVE_SPEED = 120.0
+
 
 class Playing(object):
     """当前正在播放的一段动画。
@@ -320,10 +332,14 @@ class Animator(QObject):
             self.store.request(name)
 
     def start_move(self, spec):
-        """开始一段带真实位移的移动动画。"""
+        """开始一段带真实位移的移动动画。
+
+        速度 = `MOVE_SPEED` × 朝向 × `spec.speed_scale`。`speedScale` 让"部分动作
+        也能有位移、但慢一点"成为可能：给它 0.3，那个动作就慢慢挪而不是快步走。
+        """
         self.move = spec
         self.move_left = spec.distance()
-        self.move_vx = 120.0 * self.facing
+        self.move_vx = MOVE_SPEED * self.facing * getattr(spec, "speed_scale", 1.0)
         if self.play(spec.name, loop=False, crossfade=140):
             return True
         self.move = None

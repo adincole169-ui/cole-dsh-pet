@@ -526,6 +526,28 @@ class PetWindow(QWidget):
                     self.vy -= self.vy * min(1.0, 1.6 * DT)
                     if abs(self.vy) < 6.0:
                         self.vy = 0.0
+                # **关掉重力时必须自己衰减水平速度。**
+                #
+                # 为什么：`gravity: 0` 时宠物永远落不到 `ground_line()`（它悬在
+                # 放下它的地方），于是上面那个 `if self.pos_y >= floor` 分支
+                # **永远不成立**、`self.grounded` 永远是 False —— 而水平摩擦只写在
+                # `if self.grounded:` 里面。结果是**任何残余 vx 都永不衰减**：
+                # 实测注入 vx=60，5 秒后还剩 -46.80（正好是撞左墙的
+                # `60 * restitution 0.78`），也就是说除了撞墙，一点摩擦都没有。
+                #
+                # 用户看到的现象就是"自由活动时其他动作也在动"：宠物在播
+                # 「待机呼吸休闲」这种完全不该移动的动作时，仍以约 5.7 px/s 恒定向右滑。
+                # （见 tools/selftest_no_drift.py）
+                #
+                # 语义上也说得通：关掉重力 = "宠物待在放下它的地方"，那它就是在
+                # "停着"，水平速度当然该像地面摩擦一样衰减。
+                # 重力**开着**时这里不动：那种情况下 `else` 分支意味着"宠物被抛在空中"，
+                # 水平速度保持才是对的（抛物线）。
+                if not self.use_gravity():
+                    friction = float(self.config.physics.get("groundFriction", 2.5))
+                    self.vx -= self.vx * min(1.0, friction * DT)
+                    if abs(self.vx) < 4.0:
+                        self.vx = 0.0
 
             # "原地待着"模式：**自动移动**产生的速度要被清掉。拦在 `on_move` 里是
             # 主手段，这里再兜一道——因为惯性、以及别的路径给 `self.vx` 赋的值都会
