@@ -51,6 +51,30 @@ def discover():
     return names
 
 
+def discover_node():
+    """`tools/test_*.mjs` —— DSH 插件那一侧的 Node 测试。
+
+    **它们曾经被漏掉过**：我按 `plugins/**/*.test.js` 找、没找到，就断言"仓库里
+    一个 Node 测试都没有"，还把 README 里正确的"6 个 Node 测试"改成了 0。
+    实际命名是 `tools/test_*.mjs`。把这一步并进一键运行器，就是为了让"有哪些测试"
+    不用靠猜。
+    """
+    names = []
+    for entry in sorted(os.listdir(HERE)):
+        if entry.startswith("test_") and entry.endswith(".mjs"):
+            names.append(entry)
+    return names
+
+
+def node_available():
+    try:
+        done = subprocess.run(["node", "--version"], capture_output=True, text=True,
+                              timeout=30)
+        return done.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def main():
     argv = sys.argv[1:]
     if "--list" in argv:
@@ -69,12 +93,31 @@ def main():
     if "--all" not in argv:
         names = [n for n in names if n not in SLOW_OR_ENV]
 
+    # Node 测试（tools/test_*.mjs）也一起跑 —— 它们覆盖的是 DSH 插件那一侧，
+    # 漏掉的话"全部通过"就是假的。
+    node_tests = []
+    if "--no-node" not in argv:
+        if node_available():
+            node_tests = discover_node()
+            if "--only" in argv:
+                wanted = argv[argv.index("--only") + 1:]
+                node_tests = [n for n in node_tests
+                              if any(w in n for w in wanted)]
+        else:
+            print()
+            print("  （PATH 里没有 node，跳过 %d 个 Node 测试）"
+                  % len(discover_node()))
+
+    total = len(names) + len(node_tests)
     print()
-    print("  批量自检：%d 个脚本（串行）" % len(names))
+    print("  批量自检：%d 个脚本（串行；Python %d + Node %d）"
+          % (total, len(names), len(node_tests)))
     print("  " + "=" * 74)
     results = []
     started_all = time.time()
-    for index, name in enumerate(names):
+    index = 0
+    for name in names:
+        index += 1
         path = os.path.join(HERE, name + ".py")
         limit = PER_TEST_TIMEOUT.get(name, DEFAULT_TIMEOUT)
         started = time.time()
@@ -91,7 +134,26 @@ def main():
         results.append((name, code, elapsed, output))
         mark = "[通过]" if code == 0 else "[失败]"
         print("  %2d/%2d %s %-38s %5.1f 秒"
-              % (index + 1, len(names), mark, name, elapsed))
+              % (index, total, mark, name, elapsed))
+
+    for name in node_tests:
+        index += 1
+        path = os.path.join(HERE, name)
+        limit = PER_TEST_TIMEOUT.get(name[:-4], DEFAULT_TIMEOUT)
+        started = time.time()
+        try:
+            done = subprocess.run(["node", path], cwd=ROOT,
+                                  capture_output=True, text=True, timeout=limit)
+            code = done.returncode
+            output = (done.stdout or "") + (done.stderr or "")
+        except subprocess.TimeoutExpired:
+            code = -9
+            output = "超时 %d 秒" % limit
+        elapsed = time.time() - started
+        results.append((name, code, elapsed, output))
+        mark = "[通过]" if code == 0 else "[失败]"
+        print("  %2d/%2d %s %-38s %5.1f 秒"
+              % (index, total, mark, name + "  (node)", elapsed))
 
     passed = [r for r in results if r[1] == 0]
     failed = [r for r in results if r[1] != 0]

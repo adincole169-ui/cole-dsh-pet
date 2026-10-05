@@ -67,19 +67,25 @@
 
 ### 测试
 
-- **39 个自检脚本**（28 个 `selftest_*` + 11 个 `verify_*`），
-  用 `python tools\run_selftests.py` 一键跑（默认跑其中 31 个；
-  其余需要联网或打包产物，列表见脚本里的 `SLOW_OR_ENV`）
+- **45 个自检脚本**：28 个 Python `selftest_*` + 11 个 `verify_*`，外加
+  **6 个 Node 测试**（`tools/test_*.mjs`，覆盖 DSH 插件那一侧：
+  `test_balance` / `test_bridge_plugin` / `test_busy_watchdog` / `test_link_e2e` /
+  `test_plugin_chat` / `test_plugin_robustness`）
+- Python 那批用 `python tools\run_selftests.py` 一键跑（默认跑 39 个里的 31 个；
+  其余需要联网或打包产物，列表见脚本里的 `SLOW_OR_ENV`）；Node 那 6 个直接
+  `node tools\test_xxx.mjs`
 - 关键自检都做过**反向验证**（把修复撤掉，确认它真的会失败）：
   `selftest_settle_window` / `selftest_no_drift` / `selftest_wall_turnaround` /
-  `selftest_runtime_files`
+  `selftest_runtime_files` / `selftest_bridge_security`
 - 端到端验证：`verify_public_clone.py`（匿名克隆后能不能直接跑）、
   `verify_clone_icon_loads.py`（克隆后图标真的能加载，不是只看文件在不在）、
   `verify_remote_icons.py`（远程图标与本机逐字节比对）
 
-> **关于 DSH 联动插件**：`plugins/dsh-pet-bridge/` 只有 `package.json` 与
-> `lib/index.js`，**没有任何 Node 测试**。（README 早先写的"6 个 Node 测试"
-> 是遗留的错误说法，已经改掉 —— 这类没量过的数字正是最容易长期错下去的东西。）
+> **一个我犯过的错，留在这里当反面教材**：我曾把 README 里的"6 个 Node 测试"
+> 改成"0 个"，理由是我在 `plugins/` 下按 `*.test.js` 搜、没找到。
+> 实际上它们在 **`tools/test_*.mjs`**，命名规则不同（`.mjs` + `test_` 前缀）。
+> **"我没搜到"不等于"不存在"** —— 下结论前要换几种命名/位置再搜一遍，
+> 尤其是要**否定**一个已有说法的时候。
 
 ### 已知限制
 

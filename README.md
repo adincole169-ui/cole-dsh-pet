@@ -9,9 +9,16 @@
 你让它干活它切"忙碌"，干完它蹦一下，出错它叹口气，余额少了它皱眉。
 
 **状态**：个人项目，已在 Windows 10/11 + PyQt5 5.9.2 / 5.15.11 上实测通过。
-自检共 **39 个脚本**（28 个 `selftest_*` + 11 个 `verify_*`），
-`python tools\run_selftests.py` 默认跑其中 31 个（其余需要联网/打包产物，见脚本里的
-`SLOW_OR_ENV`）。
+
+自检共 **45 个脚本**：28 个 Python `selftest_*` + 11 个 `verify_*` + 6 个 Node
+`tools/test_*.mjs`（插件那一侧）。一条命令跑 Python 那批：
+
+```powershell
+python tools\run_selftests.py
+```
+
+（默认跑 39 个里的 31 个；其余需要联网或打包产物，列表见脚本里的 `SLOW_OR_ENV`。
+Node 那 6 个直接 `node tools\test_xxx.mjs`。）
 
 > ### 已经装过了？要看怎么更新 → **[UPDATE.md](UPDATE.md)**
 >

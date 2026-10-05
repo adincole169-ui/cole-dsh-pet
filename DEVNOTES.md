@@ -177,7 +177,7 @@ pythonw.exe -X utf8 main.py --pet 我的猫
 
 ---
 
-## 踩过的坑（32 条）
+## 踩过的坑（34 条）
 
 前三条都是"看起来该对、实际不对"，而且症状都不指向真正的原因。
 
@@ -1179,6 +1179,108 @@ config.user.jsonc（被 src/config.py 引用）"，退出码 1 ✓
 同一次还修了它输出里的一句**误导性提示**：原先所有"可选缺失"都提示
 "跑 `python tools/setup_assets.py` 补齐"，而 `config.user.jsonc` 跟 webm 毫无关系 ——
 按那个提示去跑解码只会白等十分钟。改成**按项给各自的补齐办法**。
+
+### 33. **只绑回环地址挡不住浏览器** —— 本机服务必须自己判断"请求是不是浏览器发的"
+
+这是一个安全缺陷，不是"理论上可能"。桌宠在自己的 8899 上起 HTTP 服务，插件在
+8900 上起另一个，两个都只绑 `127.0.0.1`，本以为"只有本机能访问"。**错。**
+
+**浏览器里的 JavaScript 可以直接访问 `127.0.0.1`。** 用户打开的任何网页（钓鱼站、
+被植入的恶意广告、论坛里的 XSS）都能：
+
+```js
+fetch('http://127.0.0.1:8900/chat', {          // 插件的模型服务
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({text: '帮我写一篇论文', provider: 'deepseek-account',
+                        model: 'deepseek-reasoner'})
+});
+```
+
+后果按严重度排：
+
+* **8900 的 `/chat` 最严重** —— 它**用用户登录 DSH 的账号调用模型**：烧他的余额，
+  而且提示词完全由那个网页决定；
+* 8899 的 `/say` `/mood` —— 让桌宠显示任意文字（伪造通知、钓鱼）；
+* `/place` `/anim` —— 把宠物挪出屏幕、控制它的动作；
+* `/whisper` —— 触发一次模型调用。
+
+**为什么"加 CORS 头"不管用**：攻击者根本不需要读响应，只要请求**被执行**就够。
+而且跨域 POST 在浏览器眼里常是"简单请求"，**不发预检**，请求直接就出去了。
+**也不能靠检查 Content-Type**：简单请求会被降级成 `text/plain`。
+
+#### 判据：这个请求是不是浏览器发起的
+
+真浏览器一定带 `Sec-Fetch-Site` / `Sec-Fetch-Dest`（页面 JS 无法伪造，它们是
+forbidden header），跨域请求还带 `Origin`；而本机脚本都不带。
+
+**但"哪些头算浏览器"这件事我一开始判断错了，是靠实测纠正的。**
+我先写成"带 `Origin` 或**任何** `Sec-Fetch-*` 就拒"，注释里还断言"Node 的 fetch
+不带" —— 一跑测试就大面积失败。实测（`tools/probe_request_headers.mjs`，起一个
+服务把每种客户端真实发出的头打出来）：
+
+```text
+node:http.request（插件投状态）    Origin=无  Sec-Fetch-*=无
+Python urllib（chat.py 问插件）    Origin=无  Sec-Fetch-*=无
+Node fetch（自检用）              Origin=无  Sec-Fetch-*=**sec-fetch-mode**
+浏览器（跨域 fetch / <img> / 表单） Origin=有  Sec-Fetch-*=site,dest,mode
+```
+
+**`sec-fetch-mode` 是唯一连 Node 的 fetch（undici）也会发的**，拿它当判据会误伤
+合法的本机调用方；而浏览器**必定同时带 `site` 与 `dest`**。所以正确判据是
+**只看 `Origin` / `Sec-Fetch-Site` / `Sec-Fetch-Dest`，排除 `Sec-Fetch-Mode`** ——
+既挡住所有浏览器路径，又不误伤自己的通路。
+
+#### 三层防护
+
+1. **浏览器判据**（上面那条）→ 403；
+2. **Host 必须是回环地址**（`127.0.0.1` / `localhost` / `::1`）→ 挡 DNS rebinding
+   （攻击者把自己的域名解析到 127.0.0.1，页面就能 `fetch('http://evil.example:8899/...')`）；
+3. **请求体上限 64 KB** → 原来的 `_body()` 按 `Content-Length` 一次性读进内存，
+   一个巨大的值就能吃满内存。另外补了 `X-Content-Type-Options: nosniff`。
+
+被拒时**写一行日志**：这是安全事件，用户应该有机会知道"有网页在试着操控我的桌宠"。
+
+#### 两个实现细节（都踩过）
+
+* **超大 body 要"边读边丢"再回包**。直接不看 body 就回包并关连接的话，客户端还在写，
+  它拿到的是**连接重置**而不是状态码 —— 于是"请求被拒"在调用方看来成了"网络坏了"。
+  Python 侧用 `_drain()`、Node 侧用 `req.resume()`，都是有上限地丢。
+* **被拒的请求不能有副作用**，这一条要单独断言：自检里数"假桌宠收到了几个信号"。
+
+#### 验证
+
+* `tools/selftest_bridge_security.py` —— 真起一个 HTTP 服务发真请求（要验的正是
+  "HTTP 头长什么样"，直接调方法验不了）；
+* `tools/test_plugin_chat.mjs` 末尾新增安全断言，并且**直接数模型调用次数**
+  —— 那才是"余额有没有被烧"的直接证据；
+* **反向验证过**：把 `_guard()` 临时改成 `return False`，9 项失败，其中
+  "被拒之后假桌宠没有收到任何信号"显示 **信号数 1 → 9** —— 说明攻击在无防护时
+  真实生效，防护确实把它关掉了。
+
+> **测试里不能用 `fetch` 来伪造 `Origin`/`Host`**：它们在 Fetch 规范里是
+> forbidden header，`fetch()` 会**静默忽略**你设的值，于是测试会在
+> "以为发了、其实没发"的情况下**假通过**。必须用 `node:http` / `urllib` 直接发。
+
+### 34. 表情包可以加载**任意绝对路径**
+
+`PetWindow._load_image()` 原本是：
+
+```python
+if os.path.isabs(name_or_path) and os.path.exists(name_or_path):
+    candidates.append(name_or_path)      # 任意绝对路径都直接 QPixmap(...)
+```
+
+于是 `POST /say {"image": "C:/.../某张图.png"}` 能让桌宠加载并显示机器上任意一张图。
+攻击者**读不回**那张图（它只画在用户屏幕上，回包永远是 `{ok:true}`），所以不是直接
+泄露；但配合伪造的文字能做出很唬人的假通知，属于不必要的攻击面。
+
+**合法调用方（DSH 插件）只发表情包名字，从不发路径** —— 所以收紧无损失：只允许
+`memes/` 目录下的名字/文件名，拼完用 `realpath` 比较一次（`os.path.join` 遇到
+绝对路径会**直接返回那个路径**，`"../.."` 也能逃出去）。
+
+`tools/selftest_image_scope.py` 覆盖四种越界，并且**特意在 `memes/` 之外造一张
+真实存在的图片** —— 否则"因为文件不存在所以被拒"会让自检假通过。
 
 ### 诊断"宠物不见了"
 

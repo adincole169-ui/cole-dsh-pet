@@ -1053,14 +1053,31 @@ class PetWindow(QWidget):
         self.update()
 
     def _load_image(self, name_or_path):
-        """表情包：接受直接路径，或 memes 目录下的文件名/键名。"""
-        candidates = []
-        if os.path.isabs(name_or_path) and os.path.exists(name_or_path):
-            candidates.append(name_or_path)
-        else:
-            for base in (name_or_path, name_or_path + ".png", name_or_path + ".webp"):
-                candidates.append(os.path.join(MEME_DIR, base))
-        for path in candidates:
+        """表情包：**只接受 `memes/` 目录下的文件名或键名**。
+
+        为什么收紧（原先允许任意绝对路径）：原实现是
+
+            if os.path.isabs(name_or_path) and os.path.exists(name_or_path):
+                candidates.append(name_or_path)      # 任意绝对路径都直接 QPixmap(...)
+
+        于是 `POST /say {"image": "C:/.../某张图.png"}` 能让桌宠加载并显示机器上任意
+        一张图片。攻击者**读不回**那张图（它只画在用户屏幕上，回包永远是
+        `{ok:true}`），所以这不是直接的泄露；但它能配合伪造的文字做出很唬人的假通知，
+        属于不必要的攻击面。
+
+        合法调用方（DSH 插件）**只发表情包名字**，从不需要路径 —— 所以收紧无损失。
+        想显示自己的图片，放进 `memes/` 即可。
+
+        拼接之后还要确认结果仍在 `memes/` 内：`os.path.join` 遇到绝对路径会
+        **直接返回那个路径**（Python 语义），而 `"../../secret.png"` 这种带 `..`
+        的名字也能逃出去，所以用 `realpath` 比较一次（`..` 与符号链接都挡住）。
+        """
+        root = os.path.realpath(MEME_DIR)
+        for candidate in (name_or_path, name_or_path + ".png", name_or_path + ".webp"):
+            path = os.path.join(MEME_DIR, candidate)
+            real = os.path.realpath(path)
+            if real != root and not real.startswith(root + os.sep):
+                continue
             if os.path.exists(path):
                 pixmap = QPixmap(path)
                 if not pixmap.isNull():

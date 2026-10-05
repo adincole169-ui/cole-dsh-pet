@@ -47,6 +47,10 @@ const DEFAULT_PET_PORT = 8899;
 /** Where this plugin's model service listens (the pet calls it). */
 const DEFAULT_SELF_PORT = 8900;
 
+/** 请求体上限（字节）。桌宠问一句远用不到 64 KB；不设上限的话一个巨大的 body
+ *  就能把插件（宿主进程的一部分）的内存吃满。 */
+const MAX_BODY_BYTES = 64 * 1024;
+
 /** How long a tool call may stay silent before "busy" decays to "filing". */
 const BUSY_DECAY_MS = 4000;
 
@@ -459,9 +463,60 @@ export function apply(ctx, config = {}) {
         const server = createServer((req, res) => {
           const reply = (code, payload) => {
             const body = JSON.stringify(payload);
-            res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.writeHead(code, {
+              'Content-Type': 'application/json; charset=utf-8',
+              // 不让浏览器猜类型：万一有人用 <script src> 指过来，
+              // nosniff 能让它不去把 JSON 当脚本执行。
+              'X-Content-Type-Options': 'nosniff',
+            });
             res.end(body);
           };
+
+          // ---- 安全闸门 -------------------------------------------------- //
+          //
+          // **这个端口比桌宠的 8899 更危险**：`/chat` 会**用用户登录 DSH 的账号
+          // 调用模型** —— 网页里的 JS 只要能发一个请求，就能烧他的余额，
+          // 而且提示词完全由那个网页决定。
+          //
+          // 只绑回环地址挡不住浏览器：任何网页（钓鱼站、被植入的广告、论坛 XSS）
+          // 都能 `fetch('http://127.0.0.1:8900/chat', ...)`。
+          //
+          // **加 CORS 头没用**：攻击者不需要读响应，只要请求被执行就够；而且跨域
+          // POST 常被浏览器当成"简单请求"，**不发预检**，请求直接就出去了。
+          // 也不能靠检查 Content-Type —— 简单请求的 Content-Type 会被降级成 text/plain。
+          //
+          // 判据是"**这个请求是不是浏览器发起的**"。实测
+          // （tools/probe_request_headers.mjs）各客户端真实发出的头：
+          //
+          //   node:http.request（桌宠投状态……不，是插件投状态）  Origin=无  Sec-Fetch-*=无
+          //   Python urllib（桌宠问本插件）                      Origin=无  Sec-Fetch-*=无
+          //   Node fetch（自检用）                              Origin=无  Sec-Fetch-*=**sec-fetch-mode**
+          //   浏览器（跨域 fetch / <img> / 表单）                 Origin=有  Sec-Fetch-*=site,dest,mode
+          //
+          // 所以**只看 `Origin` / `Sec-Fetch-Site` / `Sec-Fetch-Dest`，不看 `Sec-Fetch-Mode`**：
+          // `sec-fetch-mode` 是唯一连 Node 的 fetch（undici）也会发的，拿它当判据会误伤
+          // 合法的本机调用方；而浏览器**必定同时带 site 与 dest**，排除 mode 不损失覆盖。
+          const BROWSER_HEADERS = ['origin', 'sec-fetch-site', 'sec-fetch-dest'];
+          const reqHeaders = req.headers || {};
+          const fromBrowser = Object.keys(reqHeaders).some(
+            (key) => BROWSER_HEADERS.includes(key.toLowerCase()),
+          );
+          const hostName = String(reqHeaders.host || '')
+            .split(':')[0]
+            .replace(/^\[|\]$/g, '')
+            .toLowerCase();
+          // Host 必须是回环地址 —— 挡 DNS rebinding（攻击者把域名解析到 127.0.0.1）。
+          const hostOk = ['', '127.0.0.1', 'localhost', '::1'].includes(hostName);
+          if (fromBrowser || !hostOk) {
+            // 用模板字符串而不是 `%s` 占位符：占位符要靠 logger 自己格式化，
+            // 不保证所有实现都做（自检里的 logger 就不做，于是日志里是字面 `%s`）。
+            ctx.logger?.warn?.(
+              `dsh-pet-bridge: 拒绝了一个${fromBrowser ? '浏览器发起' : 'Host 非回环地址'}`
+              + `的请求 ${req.url || ''} —— 可能有网页在尝试用你的账号调用模型`,
+            );
+            reply(403, { ok: false, error: 'forbidden' });
+            return;
+          }
 
           if (req.method === 'GET' && req.url?.startsWith('/health')) {
             // `balance` 是给诊断用的：把真实余额原样暴露出来，才能核对分档阈值对不对
@@ -505,10 +560,28 @@ export function apply(ctx, config = {}) {
           }
 
           let body = '';
+          let bodyTooBig = false;
           req.on('data', (chunk) => {
+            if (bodyTooBig) {
+              return;
+            }
             body += chunk;
+            // 上限 64 KB：桌宠问一句用不了这么多；不设上限的话，
+            // 一个巨大的 body 就能把插件（宿主进程的一部分）的内存吃满。
+            if (body.length > MAX_BODY_BYTES) {
+              bodyTooBig = true;
+              body = '';                 // 立刻释放已缓冲的部分
+              reply(413, { ok: false, error: 'body too large' });
+              // **不要 req.destroy()**：那样 `end` 不会触发、客户端只能拿到一个
+              // 连接重置（状态码 -1），于是"被拒"在调用方看来成了"网络坏了"。
+              // `resume()` 把剩下的读掉丢掉 —— 有上限、不缓冲。
+              req.resume();
+            }
           });
           req.on('end', async () => {
+            if (bodyTooBig) {
+              return;                    // 已经回过 413 了
+            }
             let payload = {};
             try {
               payload = JSON.parse(body || '{}');
