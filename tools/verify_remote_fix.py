@@ -13,6 +13,7 @@
 
 import ast
 import os
+import re
 import subprocess
 import sys
 
@@ -28,6 +29,19 @@ def git(args):
 def remote_file(path):
     code, out = git(["show", "origin/main:%s" % path])
     return out if code == 0 else None
+
+
+def _audit_forbidden():
+    """读 audit_publish.py 里的 FORBIDDEN_DIRS。
+
+    刻意**从源码里读**而不是在两边各写一份：这样"审计脚本把 assets/ 又列回禁止目录"
+    这种回退会立刻在这里暴露。
+    """
+    source = remote_file("tools/audit_publish.py") or ""
+    match = re.search(r"FORBIDDEN_DIRS\s*=\s*\[(.*?)\]", source, re.S)
+    if not match:
+        return []
+    return re.findall(r'"([^"]+)"', match.group(1))
 
 
 def find_function(tree, name, class_name=None):
@@ -178,19 +192,41 @@ def main():
           "缺 %s" % missing if missing else "%d 项齐" % len(wanted))
 
     print()
+    # 只查**永远不该出现**的目录。`assets/` 与 `memes/` 是**有意分发**的
+    # （图标运行必需，见 _audit_forbidden 与 .gitignore 的说明），不能列在这里。
     bad_dirs = [name for name in tracked_set
-                if name.split("/")[0] in ("frames", "assets", "memes", "logs", "dist")]
+                if name.split("/")[0] in ("frames", "logs", "dist")]
     bad_temp = [name for name in tracked_set
                 if os.path.basename(name) in ("_commit_msg.txt", "_msg2.txt",
-                                              "_msg3.txt", "_msg4.txt")]
+                                              "_msg3.txt", "_msg4.txt",
+                                              "_msg5.txt", "_msg6.txt",
+                                              "_msg7.txt", "_msg8.txt")]
     webm = [name for name in tracked_set if name.startswith("webm/")]
 
-    check("不含 frames/assets/memes/logs/dist", not bad_dirs,
+    check("不含 frames/logs/dist（可由 webm 再生成或属私人数据）", not bad_dirs,
           str(bad_dirs[:3]) if bad_dirs else "")
     check("不含临时提交信息文件", not bad_temp, str(bad_temp) if bad_temp else "")
     check("随仓库分发的 webm 是 106 个", len(webm) == 106, "实为 %d" % len(webm))
-    check("远程文件总数合理", 190 <= len(tracked_set) <= 220,
+    check("远程文件总数合理", 200 <= len(tracked_set) <= 240,
           "%d 个" % len(tracked_set))
+
+    # 图标与表情包必须**在**远程：缺了图标不会报错，只会静默地没有图标
+    # （用户报过"GitHub 上发出去的他们用起来图标是没有的"）
+    icons = sorted(name for name in tracked_set if name.startswith("assets/"))
+    memes = sorted(name for name in tracked_set if name.startswith("memes/"))
+    check("远程有 assets/icon.ico（运行必需）",
+          "assets/icon.ico" in tracked_set)
+    check("远程有 assets/icon.png（兜底）",
+          "assets/icon.png" in tracked_set)
+    check("远程图标共 4 个", len(icons) == 4,
+          "实为 %d：%s" % (len(icons), icons))
+    check("远程表情包共 8 个", len(memes) == 8, "实为 %d" % len(memes))
+    strays = [name for name in icons if "icon-full" in name]
+    check("远程不含孤儿图标 icon-full.*", not strays, str(strays) if strays else "")
+    # 反过来：这些目录不该出现在"禁止"的判定里（早期版本曾把它们排除掉）
+    check("audit 不再把 assets/memes 当禁止目录",
+          "assets" not in _audit_forbidden() and "memes" not in _audit_forbidden(),
+          "FORBIDDEN_DIRS=%s" % _audit_forbidden())
 
     print()
     readme = remote_file("README.md") or ""
