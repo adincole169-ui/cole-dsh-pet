@@ -26,6 +26,7 @@
 
 import os
 import sys
+import time
 from collections import deque
 from threading import Lock, Thread
 
@@ -40,6 +41,10 @@ import stream_frames  # noqa: E402
 
 # 默认帧来源。`"stream"` 让磁盘占用归零；ffmpeg 不可用时自动退回 `"cache"`。
 DEFAULT_SOURCE = "stream"
+
+# 加载失败后多久之内不再重试（秒）。够长，免得坏名字/缺文件刷屏；也不是永久，
+# 这样用户补上 webm 之后不必重启桌宠。
+FAILED_COOLDOWN_SEC = 60.0
 
 
 def default_source():
@@ -122,10 +127,14 @@ class FrameStore(QObject):
         self.misses = 0
         self.reloads = 0
         self.stream_failures = 0
+        # 加载失败的动画：name -> 失败时刻（time.monotonic()）。冷却期内 `request()`
+        # 不再重试 —— 否则 `_heal()` 每 33 ms 就重新排一次队，每秒新开约 30 个线程 ✗
+        self._failed = {}
         # `loaded` 一到就把动画登记进 `_cache`：这样 `request()` 之后的
         # `peek()` 立刻能拿到，预热（`warm()`）也靠它生效。
         # `finish_load` 是幂等的，动画那边的 `on_loaded` 再调一次也无害。
         self.loaded.connect(self._register_loaded)
+        self.failed.connect(self._register_failed)
 
     def pin(self, name):
         """钉住一个动画：它是当前正在播的，淘汰它会让画面直接没帧。"""
@@ -171,6 +180,16 @@ class FrameStore(QObject):
     def is_loading(self, name):
         return name in self._loading
 
+    def is_failed(self, name):
+        """最近加载失败过、还在冷却期内（期间不重试）。"""
+        at = self._failed.get(name)
+        if at is None:
+            return False
+        if time.monotonic() - at >= FAILED_COOLDOWN_SEC:
+            self._failed.pop(name, None)      # 冷却结束，允许再试一次
+            return False
+        return True
+
     # -- 取用 ---------------------------------------------------------------- #
     def animation(self, name):
         """同步取一个动画（**会阻塞**，只在启动预解码/自检里用）。
@@ -193,6 +212,11 @@ class FrameStore(QObject):
         cached = self.peek(name)
         if cached is not None:
             return cached
+        if self.is_failed(name):
+            # 冷却期内不重试：直接给兜底帧。**这一条很重要** —— `Animator._heal()`
+            # 每 tick（33 ms）都会调到这里，不加冷却的话一个加载失败的动画会每秒
+            # 新开约 30 个线程，白烧 CPU 还刷屏。
+            return self._best_fallback()
         self._start_background(name)
         return self._best_fallback()
 
@@ -218,7 +242,9 @@ class FrameStore(QObject):
             except Exception as error:
                 sys.stderr.write("dsh-pet: 准备失败 %s: %s\n" % (name, error))
                 ok = False
-            self._loading.discard(name)
+            # **`_loading` 不在这里摘。** 要等 GUI 线程的 `_register_loaded` /
+            # `_register_failed` 处理完再摘 —— 否则在"摘掉了、还没登记进 `_cache`"
+            # 这段空档里，`_heal()` 会再起一个 worker，多出一个没人接手的 ffmpeg。
             if ok:
                 self.loaded.emit(name)
             else:
@@ -238,7 +264,9 @@ class FrameStore(QObject):
         ffmpeg 有问题，只要之前解过码就还能用，不会变成"宠物不见了"。
         """
         with self._stream_lock:
-            if name in self._streams:
+            # 已经解好的也算成功：否则"流没了但 cache 里有"会被当成失败，
+            # 白白进冷却期。
+            if name in self._streams or name in self._cache:
                 return True
         info = stream_frames.webm_info(name)
         if not info:
@@ -274,7 +302,17 @@ class FrameStore(QObject):
 
     def _register_loaded(self, name):
         """`loaded` 一到就登记进 `_cache`（GUI 线程）。"""
-        self.finish_load(name)
+        try:
+            self.finish_load(name)
+        finally:
+            # 登记完才摘 `_loading`（见 worker 里的说明），并清掉可能存在的失败记录。
+            self._loading.discard(name)
+            self._failed.pop(name, None)
+
+    def _register_failed(self, name):
+        """`failed` 到达（GUI 线程）：记下失败时刻，冷却期内不再重试。"""
+        self._loading.discard(name)
+        self._failed[name] = time.monotonic()
 
     def finish_load(self, name):
         """在 **GUI 线程**里把后台准备好的东西登记成一个动画对象。"""
@@ -418,4 +456,6 @@ class FrameStore(QObject):
             "reloads": self.reloads,
             "streamFailures": self.stream_failures,
             "loading": sorted(self._loading),
+            # 冷却期内不再重试的动画：排查"某个动作一直不播"时看这个
+            "failed": sorted(self._failed),
         }

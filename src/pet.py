@@ -223,6 +223,16 @@ class PetWindow(QWidget):
         self.animator.moved.connect(self.on_move)
         # 后台加载完成 → 在 GUI 线程把帧接上（QPixmap 不能跨线程构造）
         store.loaded.connect(self.animator.on_loaded)
+        # 加载失败 → 换下一段。**这一条原先漏了**：`FrameStore.failed` 定义了却
+        # 没有任何接收者，于是一个取不到帧的动画会让 `Playing.advance()` 永远不推进
+        # 时间，宠物**永久定格**在上一段的最后一帧；同时 `_heal()` 每 33 ms 重试一次，
+        # 每秒新开约 30 个线程。
+        #
+        # 注意：这是本次从备份里**唯一**取用的 pet.py 改动。那次整合还改过本文件的
+        # 拖动相关代码（`QPoint(int(...))`、`drag_history` 时间戳、按真实耗时算甩抛、
+        # 松手换段），那些**都没有取** —— 它们与后来"拖拽消失 / 到不了边缘"的问题
+        # 落在同一片代码上，需要单独验证。
+        store.failed.connect(self.animator.on_failed)
 
         # 初始模式：`fixedEnabled = true` 就当作"原地待着"启动。
         # 这两个原本是两个各自独立的字段——`mode` 只在菜单里赋值（没人读），
