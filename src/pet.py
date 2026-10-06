@@ -223,6 +223,11 @@ class PetWindow(QWidget):
         self.animator.moved.connect(self.on_move)
         # 后台加载完成 → 在 GUI 线程把帧接上（QPixmap 不能跨线程构造）
         store.loaded.connect(self.animator.on_loaded)
+        # 加载失败 → 换下一段。**这一条原先漏了**：`FrameStore.failed` 定义了却
+        # 没有任何接收者，于是一个取不到帧的动画会让 `Playing.advance()` 永远不推进时间，
+        # 宠物**永久定格**在上一段的最后一帧；同时 `_heal()` 每 33 ms 重试一次，
+        # 每秒新开约 30 个线程。
+        store.failed.connect(self.animator.on_failed)
 
         # 初始模式：`fixedEnabled = true` 就当作"原地待着"启动。
         # 这两个原本是两个各自独立的字段——`mode` 只在菜单里赋值（没人读），
@@ -1325,10 +1330,16 @@ class PetWindow(QWidget):
             self.press_pos = event.globalPos()
             # 只记按下点，不记 frameGeometry 的偏移：拖动全程用 globalPos 与 pos() 的
             # 差量推进，避免再踩一次逻辑/物理坐标混用的坑。
-            self.drag_offset = QPoint(self.pos_x - event.globalPos().x(),
-                                      self.pos_y - event.globalPos().y())
+            #
+            # `QPoint` **只接受 int**：`pos_x` / `pos_y` 是 float，在较新的 PyQt5 +
+            # Python 3.10 上会直接 `TypeError`。本机 PyQt5 5.9.2 恰好容忍，所以这个坑
+            # 在本机看不出来、在别人机器上一按就崩。
+            self.drag_offset = QPoint(int(self.pos_x - event.globalPos().x()),
+                                      int(self.pos_y - event.globalPos().y()))
             self.dragging = True
-            self.drag_history = [(self.pos_x, self.pos_y)]
+            # 带时间戳：鼠标事件频率（125 Hz 以上）和 tick（33 ms）无关，
+            # 甩抛速度必须按**真实耗时**算，不能假设每帧隔 DT。
+            self.drag_history = [(self.pos_x, self.pos_y, time.monotonic())]
             self.animator.play_drag()
             event.accept()
 
@@ -1339,7 +1350,7 @@ class PetWindow(QWidget):
             # 过阻尼弹簧跟手：直接跳到位会显得僵硬
             self.pos_x += (target_x - self.pos_x) * 0.55
             self.pos_y += (target_y - self.pos_y) * 0.55
-            self.drag_history.append((self.pos_x, self.pos_y))
+            self.drag_history.append((self.pos_x, self.pos_y, time.monotonic()))
             del self.drag_history[:-6]
             self.move(int(self.pos_x), int(self.pos_y))
             event.accept()
@@ -1348,7 +1359,8 @@ class PetWindow(QWidget):
         if event.button() != Qt.LeftButton:
             return
         moved = (event.globalPos() - self.press_pos).manhattanLength() if self.press_pos else 0
-        start = self.drag_history[0] if self.drag_history else (self.pos_x, self.pos_y)
+        # 取前两个分量：`drag_history` 里是 (x, y, 时间戳) 三元组
+        start = self.drag_history[0][:2] if self.drag_history else (self.pos_x, self.pos_y)
         self.dragging = False
         self.press_pos = None
         # 记一行拖动诊断：位移为 0 还是没记，直接区分"没按到"与"按到了没动"
@@ -1360,10 +1372,18 @@ class PetWindow(QWidget):
         else:
             # 甩抛：用最近几帧的位移估算速度
             if len(self.drag_history) >= 2:
-                (x0, y0), (x1, y1) = self.drag_history[0], self.drag_history[-1]
-                self.vx = (x1 - x0) / (DT * len(self.drag_history)) * power
-                self.vy = (y1 - y0) / (DT * len(self.drag_history)) * power
+                (x0, y0, t0), (x1, y1, t1) = self.drag_history[0], self.drag_history[-1]
+                # 用**真实耗时**；下限一个 tick，避免两次事件挨得太近时速度爆表
+                # （原先按 `DT * len(history)` 算，而鼠标事件比 tick 密得多，
+                #  于是同样的手势在快机器上算出来的速度偏小、甩不动）。
+                elapsed = max(t1 - t0, DT)
+                self.vx = (x1 - x0) / elapsed * power
+                self.vy = (y1 - y0) / elapsed * power
             self.vy = min(self.vy, 0.0) if abs(self.vy) > 1400 else self.vy
+            # **松手之后必须换段。** `play_drag()` 用的是 `loop=True`，
+            # 循环动画的 `done` 永远不会置位，没人换段的话宠物会一直保持
+            # "被拎着"的姿势（实测：`drag_frames` 一直循环下去）。
+            self.animator.next_auto()
         event.accept()
 
     def _log_drag(self, start, end, moved):

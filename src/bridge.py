@@ -206,11 +206,24 @@ def make_handler(pet):
                 self._reply(404)
 
         def do_POST(self):
+            # **POST 被拒或 body 有问题时一律关连接。**
+            #
+            # 为什么：被拒的时候请求体**还没读**（正是"不看 Content-Type 直接拒"的
+            # 好处，但代价在这里）。`protocol_version = "HTTP/1.1"` 默认 keep-alive，
+            # 于是那些没读的字节会留在连接里，被当成**下一个请求**的开头解析 ——
+            # 客户端会收到一个莫名其妙的 404/400，而两个请求都已经发出去了。
+            # 关连接是最省事也最可靠的收尾。
+            #
+            # 提前设置是必须的：`_guard()` 里已经把 403 发出去了，而 `close_connection`
+            # 是在处理函数返回**之后**才被 `BaseHTTPRequestHandler` 读取的。
             if self._guard():
+                self.close_connection = True
                 return
             path = self.path.split("?")[0].rstrip("/") or "/"
             data = self._body()
             if data is None:
+                # 同上：body 可能没读完（Content-Length 不合法时也 drain 不了）。
+                self.close_connection = True
                 self._reply(400)
                 return
 

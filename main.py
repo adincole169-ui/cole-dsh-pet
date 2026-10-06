@@ -19,6 +19,26 @@ from urllib.request import urlopen
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "src"))
+# `tools` 也要在这里加：`_trim_own_logs()` 要 `import run_logged`。原先只在
+# `_status()` / `_predecode()` 里才加，而那两个函数正常启动时都不会被调用 ——
+# 于是每次启动那个 import 必然失败，日志清理**从来没生效过**（还每次往 stderr
+# 写一行"日志清理跳过"）。注释里当时写着"模块顶部已经加"，但实际没加。
+sys.path.insert(1, os.path.join(HERE, "tools"))
+
+# pythonw 启动时 `sys.stderr` / `sys.stdout` 是 **None**，任何 `sys.stderr.write(...)`
+# 都会抛 AttributeError（而这类代码到处都是：图标加载失败、准备失败、日志清理失败…）。
+# 兜底成写进 logs/，既不崩，也留得下线索。
+if sys.stderr is None or sys.stdout is None:
+    try:
+        os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
+        _fallback = open(os.path.join(HERE, "logs", "pythonw-stderr.log"), "a",
+                         encoding="utf-8", buffering=1)
+    except OSError:
+        _fallback = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = _fallback
+    if sys.stdout is None:
+        sys.stdout = _fallback
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import QApplication
@@ -363,6 +383,22 @@ def main():
     # 包装层 run_logged.py 管不到它。放在启动时，不必新增定时器。
     _trim_own_logs()
     store = FrameStore(keep=6, source=frame_source)
+
+    # `--predecode` 放在**建窗之前**：预解码根本不需要窗口，先建窗再退会让宠物
+    # 先闪一下再消失（用户会以为它崩了）。
+    if "--predecode" in sys.argv:
+        # `--all` 解全部 106 个（新用户建议这么做，否则没解过的动画首次播放要等 30 秒）
+        # `--jobs N` 指定并行度；不给就按核数自动决定（见 default_workers）
+        jobs = None
+        if "--jobs" in sys.argv:
+            try:
+                jobs = int(sys.argv[sys.argv.index("--jobs") + 1])
+            except (IndexError, ValueError):
+                print("--jobs 后面要跟一个数字，例如 --jobs 6")
+                return 2
+        _predecode(entries, store, all_animations="--all" in sys.argv, jobs=jobs)
+        return 0
+
     pets = []
     for pet_config in entries:
         if pet_config.display == "none":
@@ -382,19 +418,6 @@ def main():
     def preload():
         _predecode(entries, store)
 
-    if "--predecode" in sys.argv:
-        # `--all` 解全部 106 个（新用户建议这么做，否则没解过的动画首次播放要等 30 秒）
-        # `--jobs N` 指定并行度；不给就按核数自动决定（见 default_workers）
-        jobs = None
-        if "--jobs" in sys.argv:
-            try:
-                jobs = int(sys.argv[sys.argv.index("--jobs") + 1])
-            except (IndexError, ValueError):
-                print("--jobs 后面要跟一个数字，例如 --jobs 6")
-                return 2
-        _predecode(entries, store, all_animations="--all" in sys.argv, jobs=jobs)
-        return 0
-
     QTimer.singleShot(200, preload)
 
     # --watch：每秒记一行位置/可见性，用来定位"宠物不见了"这类问题。
@@ -402,6 +425,9 @@ def main():
     if "--watch" in sys.argv:
         import time as _time
         watch_path = os.path.join(HERE, "logs", "watch.log")
+        # 目录不存在时 `open()` 会在 QTimer 的槽里抛异常，而 **PyQt5 遇到槽里的
+        # 未处理异常会直接中止进程** —— 于是"开了 --watch 反而起不来"。
+        os.makedirs(os.path.dirname(watch_path), exist_ok=True)
 
         def watch():
             window = pets[0]

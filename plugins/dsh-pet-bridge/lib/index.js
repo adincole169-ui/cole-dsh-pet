@@ -462,6 +462,9 @@ export function apply(ctx, config = {}) {
       .then(({ createServer }) => {
         const server = createServer((req, res) => {
           const reply = (code, payload) => {
+            // 防止重复发送：下面既有正常回包也有 catch 兜底回包，
+            // 已经回过之后再 `writeHead` 会抛 ERR_HTTP_HEADERS_SENT。
+            if (res.headersSent || res.writableEnded) return;
             const body = JSON.stringify(payload);
             res.writeHead(code, {
               'Content-Type': 'application/json; charset=utf-8',
@@ -561,6 +564,8 @@ export function apply(ctx, config = {}) {
 
           let body = '';
           let bodyTooBig = false;
+          req.setEncoding('utf8');
+          req.on('error', () => {});       // 客户端半路断开是常态，别让它变成未处理错误
           req.on('data', (chunk) => {
             if (bodyTooBig) {
               return;
@@ -578,15 +583,35 @@ export function apply(ctx, config = {}) {
               req.resume();
             }
           });
-          req.on('end', async () => {
-            if (bodyTooBig) {
-              return;                    // 已经回过 413 了
-            }
+
+          // **这段必须做成具名 async 函数、并由调用方显式 catch。**
+          //
+          // 原先它直接写在 `req.on('end', async () => { ... })` 里：`async` 回调抛出的
+          // 异常没有任何人接，会变成 **unhandled rejection**，而 **Node 15+ 默认因此
+          // 直接退出进程** —— 那个进程就是 **DSH 宿主本身**。
+          //
+          // 实测（tools/probe_plugin_bad_body.mjs）：body 为 `null` 时
+          // `JSON.parse('null')` 是**合法**的、得到 `null`，下一行 `payload.text`
+          // 立刻抛 TypeError，**一个请求就把进程带走**（退出码 1）：
+          //
+          //     TypeError: Cannot read properties of null (reading 'text')
+          //         at IncomingMessage.<anonymous> (index.js:591:43)
+          //
+          // 所以这里三件事：校验解析结果确实是普通对象、显式 catch、reply 防重复发送。
+          const handleChat = async (rawBody) => {
             let payload = {};
             try {
-              payload = JSON.parse(body || '{}');
+              const parsed = JSON.parse(rawBody || '{}');
+              // `'null'` / 数组 / 数字 / 字符串都是**合法 JSON**，但都不是我们要的对象 ——
+              // 不校验的话下一行就会炸（就是上面那次实测）。
+              if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                reply(400, { ok: false, error: '请求体必须是一个 JSON 对象' });
+                return;
+              }
+              payload = parsed;
             } catch {
-              /* 坏 body 当作空提问 */
+              reply(400, { ok: false, error: '请求体不是合法 JSON' });
+              return;
             }
             const prompt = String(payload.text || '').trim();
             if (!prompt) {
@@ -644,6 +669,23 @@ export function apply(ctx, config = {}) {
             memory.push({ role: 'assistant', text });
             while (memory.length > rounds * 2) memory.shift();
             reply(200, { ok: true, text, image });
+          };
+
+          req.on('end', () => {
+            if (bodyTooBig) {
+              return;                    // 已经回过 413 了
+            }
+            // **兜底 catch**：任何漏网的异常都在这里落地，绝不让它变成
+            // unhandled rejection 把宿主进程带走。
+            handleChat(body).catch((error) => {
+              try {
+                ctx.logger?.warn?.('dsh-pet-bridge: /chat 处理出错（已忽略）: '
+                  + (error?.message ?? error));
+              } catch {
+                /* 连日志都失败就只能放弃 */
+              }
+              reply(500, { ok: false, error: String(error?.message ?? error) });
+            });
           });
         });
         server.on('error', (error) => {
