@@ -695,10 +695,24 @@ class PetWindow(QWidget):
         这个取舍是有意的 —— 稳定比精确重要，而且用户明确要的是"能放到边上"。
         """
         left, right = self.character_insets()
-        self._inset_min_left = (left if self._inset_min_left is None
-                                else min(self._inset_min_left, left))
-        self._inset_min_right = (right if self._inset_min_right is None
-                                 else min(self._inset_min_right, right))
+        # **忽略"退化"的留白**（左右都接近 0）。它出现在两类时刻：
+        #   * 启动瞬间还没有帧 → 走"无帧"分支，掩膜 = 整窗 → 包围盒 = 整个窗口；
+        #   * 换段加载中、`current_frame()` 一时为 None 的帧。
+        # 如果把它记进最小值，边界就被**永久**放宽成"窗口贴边"，于是角色那圈透明留白
+        # 永远进不到屏幕边 —— 用户报的"无法到达屏幕最左侧/最右侧"正是这个；
+        # 而拖到边上松手时，`step_physics` 又按这个边界把窗口**钳回去**，
+        # 表现为"到边缘突然往里闪"（跳一下 106px，看起来像消失又出现在别处）。
+        #
+        # 真实素材的角色只占画面中间一块（实测左右各约 107px 留白），
+        # 所以"左右都 ≈0"一定是退化值，不是真的角色占满窗口。
+        if left > 1.0 or right > 1.0:
+            self._inset_min_left = (left if self._inset_min_left is None
+                                    else min(self._inset_min_left, left))
+            self._inset_min_right = (right if self._inset_min_right is None
+                                     else min(self._inset_min_right, right))
+        if self._inset_min_left is None or self._inset_min_right is None:
+            # 还没遇到过有效掩膜：先按当前值用（哪怕它是退化的），总比没有强
+            return left, right
         return self._inset_min_left, self._inset_min_right
 
     def _draw_sprite(self, painter, pixmap):
@@ -878,8 +892,20 @@ class PetWindow(QWidget):
         if bubble is not None and not bubble.isEmpty():
             bubble_key = (int(bubble.left()), int(bubble.top()),
                           int(bubble.width()), int(bubble.height()))
-        key = (frame.cacheKey(), self.width(), self.height(), pad, bubble_key,
-               int(rect.left()), int(rect.top()), int(rect.width()), int(rect.height()))
+        # **按"量化后的包围盒"判断要不要重建，而不是逐帧重建。**
+        #
+        # 原先 key 里带 `frame.cacheKey()`，于是**每一帧**都会 `setMask()` —— 也就是
+        # 每秒最多 24 次 Windows 区域变更。区域变更会触发整窗重绘，是"画面闪烁"
+        # 的直接来源；而且拖动时新掩膜会把光标排除在外（`grabMouse()` 之前那版
+        # 拖不动就是这么来的）。
+        #
+        # 掩膜的作用是"哪里能点、哪里穿透"，形状差几像素没有意义，所以按 4px 量化：
+        # 只有角色轮廓**明显**移动时才重建。这样既保住精确度，又把区域变更降到
+        # "只在真的变了的时候"。
+        quant = 4
+        key = (self.width(), self.height(), pad, bubble_key,
+               int(round(rect.left() / quant)), int(round(rect.top() / quant)),
+               int(round(rect.width() / quant)), int(round(rect.height() / quant)))
         if key == self._mask_key:
             return
 
