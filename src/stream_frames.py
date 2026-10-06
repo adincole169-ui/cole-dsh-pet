@@ -51,9 +51,6 @@ META_PATH = os.path.join(ROOT, "webm-meta.json")
 # 预读多少帧。生产者比消费者快约 70 倍，所以不需要很大；
 # 留一点余量是为了系统负载高时也不会断帧。16 帧 ≈ 14 MB/动画。
 LOOKAHEAD = 16
-# 消费位置**之后**再保留几帧：给 `frame()` 的"取最近邻帧"兜底用。
-# 再多就是白占内存。内存上限 ≈ (LOOKAHEAD + KEEP_BEHIND) 帧。
-KEEP_BEHIND = 4
 
 # Windows 下不要弹出控制台窗口（否则每起一个 ffmpeg 就闪一个黑框）
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -232,16 +229,8 @@ class StreamAnimation(object):
         self._bytes_per_frame = self._width * self._height * 4
 
         self._frames = {}           # index -> QImage
-        self._seq = {}              # index -> 写入那一帧时的**绝对序号**（用来淘汰旧帧）
         self._lock = threading.Lock()
-        # **消费位置必须是绝对序号（跨圈累加），不能是取模后的帧号。**
-        #
-        # 踩过：原先 `_position` 存的是帧号（0.._count-1），而 `_written` 是累计写入
-        # 序号，两者在 `ahead = self._written - self._position` 里直接相减 —— 量纲不一致。
-        # 第一圈还没露馅，第二圈起 `_written` 已经涨到 2*_count 以上，`ahead` 恒大于
-        # lookahead，**背压永远不放行**；而那时整段动画又刚好都在内存里，于是表面看
-        # 不出问题，实际是"生产者已经死了、靠整段缓存撑着"。
-        self._position = 0          # 消费端最近的**绝对**位置
+        self._position = 0          # 消费端最近请求过的帧号
         self._written = 0           # 生产端累计写入序号
         self._stop = threading.Event()
         self._first = threading.Event()
@@ -294,13 +283,8 @@ class StreamAnimation(object):
             return None
         wanted = max(0, min(self._count - 1, int(index)))
         with self._lock:
-            # 背压与生产位置都按"消费者**想要**的位置"走。这里把帧号换算成**绝对**
-            # 位置，而且**只往前**：ffmpeg 是顺序流（`-stream_loop -1`），回不去。
-            # 想要一个更早的帧（例如重新从第 0 帧开始播）就等它下一圈转回来 ——
-            # 生产者比实时快约 70 倍，一圈也就几百毫秒，期间由下面的邻帧兜底。
-            # 若允许往回退，`_written - _position` 会远大于 lookahead，背压永远不放行。
-            delta = (wanted - self._position % self._count) % self._count
-            self._position += delta
+            # 背压与生产位置都按"消费者**想要**的位置"走
+            self._position = wanted
             image = self._frames.get(wanted)
             served = wanted
             if image is None and self._frames:
@@ -337,19 +321,14 @@ class StreamAnimation(object):
             return
         self._closed = True
         self._stop.set()
-        # **先杀进程、再等线程。** 读线程可能正阻塞在 `stdout.read()` 上，只有进程退出
-        # 才会返回；反过来做会让调用方（淘汰发生在 **GUI 线程**）白等最多 3 秒。
-        process = self._process
-        _terminate(process)
-        _unregister(process)
         thread = self._thread
-        if (thread is not None and thread.is_alive()
-                and thread is not threading.current_thread()):
-            thread.join(timeout=1)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=3)
+        _terminate(self._process)
+        _unregister(self._process)
         self._process = None
         with self._lock:
             self._frames.clear()
-            self._seq.clear()
         self._last_pixmap = None
         self._last_index = -1
 
@@ -383,21 +362,8 @@ class StreamAnimation(object):
                 image = QImage(data, self._width, self._height,
                                self._width * 4, QImage.Format_RGBA8888).copy()
                 with self._lock:
-                    slot = self._written % self._count
-                    self._frames[slot] = image
-                    self._seq[slot] = self._written
+                    self._frames[self._written % self._count] = image
                     self._written += 1
-                    # **淘汰落在消费位置之后太远的帧。**
-                    #
-                    # 踩过：`_frames` 只写不删，跑满一圈（帧号覆盖 0.._count-1 全部槽位）
-                    # 之后整段动画都留在内存里。实测（tools/probe_stream_memory.py）：
-                    # 118 帧的动画跑 2.3 圈后 `_frames` 有 118 条、RSS 涨 92 MB
-                    # （单帧 0.88 MB × 118 = 104 MB）；而更长的那批 241 帧 = 217 MB/动画，
-                    # `keep=6` 就是 1.3 GB。加淘汰之后上限 ≈ (LOOKAHEAD + KEEP_BEHIND) 帧。
-                    floor = self._position - KEEP_BEHIND
-                    for key in [k for k, seq in self._seq.items() if seq < floor]:
-                        self._seq.pop(key, None)
-                        self._frames.pop(key, None)
                 self._first.set()
         except Exception as error:
             self._error = error
