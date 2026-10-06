@@ -78,11 +78,44 @@ def main():
     print("  当前帧留白 (%.0f, %.0f)；墙壁用的稳定留白 (%.0f, %.0f)"
           % (l_now, r_now, left, right))
 
+    # --- **气泡不得影响留白**（这是"到不了屏幕边"的根因）-------------------- #
+    # `mask_stats` 来自"角色 ∪ 气泡"的并集掩膜，长气泡会把包围盒撑宽、留白变小；
+    # 墙壁若用它，宠物就永远差一段到不了边。修法是给墙壁单独用**角色自己**的包围盒。
+    print()
+    print("  气泡对留白的影响（必须没有影响）")
+    print("  " + "-" * 74)
+    before = window.character_insets()
+    long_text = "这是一句特别长的话" * 6
+    window.say(long_text, None, 5.0)
+    for _ in range(10):
+        window._repaint()
+        app.processEvents()
+    bubble = window.bubble_rect
+    after = window.character_insets()
+    print("  气泡矩形: %s" % (("(%d,%d %dx%d)" % (bubble.left(), bubble.top(),
+                                                 bubble.width(), bubble.height()))
+                              if bubble is not None and not bubble.isEmpty() else "无"))
+    print("  留白: (%.0f, %.0f) -> (%.0f, %.0f)" % (before + after))
+    bubble_in_effect = (bubble is not None and not bubble.isEmpty()
+                        and bubble.width() > window.character_bounds()[1]
+                        - window.character_bounds()[0])
+    print("  气泡是否比角色更宽（即真的会撑宽并集包围盒）: %s" % bubble_in_effect)
+    window.clear_bubble()
+    for _ in range(5):
+        window._repaint()
+        app.processEvents()
+
     window.close()
     store.close()
 
     print()
     problems = []
+    if abs(after[0] - before[0]) > 2 or abs(after[1] - before[1]) > 2:
+        problems.append("长气泡改变了留白（%.0f,%.0f -> %.0f,%.0f）—— "
+                        "墙壁会被气泡撑得算不准，宠物到不了屏幕边"
+                        % (before + after))
+    else:
+        print("  OK   长气泡没有改变留白（角色包围盒与气泡已分开）")
     if rate > frames / elapsed * 0.6:
         problems.append("setMask 仍然接近每帧一次（%.1f 次/秒）—— 量化没生效" % rate)
     else:

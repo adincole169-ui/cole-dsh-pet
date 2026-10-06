@@ -270,6 +270,9 @@ class PetWindow(QWidget):
         value = config.position.get("maskInvert")
         self.mask_invert = True if value is None else bool(value)
         self.mask_stats = None
+        # 角色**自己**的包围盒 (left, right)，不含气泡。贴边与墙壁判定用它；
+        # 点击穿透用并集掩膜（`mask_stats`）。见 `character_bounds`。
+        self._character_bbox = None
         # 见过的**最小**角色留白（左/右）。墙壁边界用它而不是当前帧的值：
         # 当前帧的留白随动画变化，会让宠物在换动画时被往里推（见 `step_physics`）。
         # 它只放宽、不收紧，所以边界只会向外扩。
@@ -665,6 +668,11 @@ class PetWindow(QWidget):
         贴边时以更宽的那个为准，避免说话时角色被推出屏幕。
         """
         stats = getattr(self, "mask_stats", None) or {}
+        # **优先用"角色自己"的包围盒**（不含气泡；见 `_build_input_bitmap`）。
+        # 用并集的话，一条长气泡就会把留白算小，宠物于是到不了屏幕边。
+        bbox = getattr(self, "_character_bbox", None)
+        if bbox:
+            return max(0.0, float(bbox[0])), min(float(self.width()), float(bbox[1]))
         rect = stats.get("rect")
         if rect:
             left = float(rect[0])
@@ -768,6 +776,15 @@ class PetWindow(QWidget):
                 if by1 > by0 and bx1 > bx0:
                     canvas[by0:by1, bx0:bx1] = 255
             solid_array = np.frombuffer(solid, dtype=np.uint8).reshape(box_h, box_w)
+            # **单独记下"角色自己"的包围盒**（不含气泡），供贴边/墙壁判定使用。
+            #
+            # 为什么要分开：`mask_stats` 来自**并集**掩膜（角色 ∪ 气泡），而一条长气泡
+            # 会把包围盒撑得很宽、留白随之变小。墙壁若用它，宠物就**到不了屏幕边**
+            # （实测：能往右挪一点，但始终差一段）。气泡是临时的 UI，不该决定宠物能站哪。
+            ys, xs = np.nonzero(solid_array)
+            if len(xs):
+                self._character_bbox = (max(0, left + int(xs.min())),
+                                        min(width, left + int(xs.max()) + 1))
             sy0 = max(0, top)
             sy1 = min(height, top + box_h)
             sx0 = max(0, left)
@@ -911,6 +928,13 @@ class PetWindow(QWidget):
 
         bitmap = self._build_input_bitmap(frame, rect, bubble)
         self.setMask(bitmap)
+        # **改完掩膜立刻重绘。** `setMask` 是一次 Windows 区域变更，而变化之后到
+        # 下一次 `paintEvent` 之间，窗口有可能被系统按"新区域 + 旧内容"重画一拍
+        # —— 用户看到的就是"闪一下 / 消失一瞬"。这里同步重画一次，把这个空档填掉。
+        #
+        # 位置是安全的：本函数由 `_repaint()` 在 `update()` **之前**调用，
+        # 不是从 `paintEvent` 里调进来的，所以 `repaint()` 不会递归。
+        self.repaint()
         self._mask_key = key
         self.mask_stats = self._mask_stats(bitmap)
         self._settle_initial_placement()
