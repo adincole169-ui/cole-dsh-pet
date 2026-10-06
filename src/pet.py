@@ -903,12 +903,28 @@ class PetWindow(QWidget):
         outgoing = self.animator.outgoing_frame()
         alpha = self.animator.fade_alpha()
         ready = self.animator.playing is not None and self.animator.playing.ready
-        if outgoing is not None and ready and alpha < 1.0:
+        frame = self.animator.current_frame()
+        # **垫层要盖住两种时刻**：①新段正在淡入（`alpha < 1`）；②**新段这一帧还没有**
+        # （`frame is None`）。
+        #
+        # 第②种原先漏了：条件里要求 `ready`，而"新段还在加载/那一帧还没被生产出来"
+        # 恰恰 **不 ready** —— 于是垫层被跳过，接着又画了个 `None`，屏幕上**什么都没有**，
+        # 就是用户看到的"动作变化时消失一瞬"。
+        #
+        # 实测（tools/probe_switch_blank.py，连续切换动画 8 次 / 320 帧）：
+        #     修流式解码内存之前：会看不见的帧 0
+        #     之后              ：会看不见的帧 35
+        # 降内存后"切回一个播过的动画"时，那一帧可能还没被生产出来（缓冲被淘汰过），
+        # 于是 `frame is None` 变得常见，把这个漏掉的分支暴露了出来。
+        #
+        # 注意这一条**只**在"本来会什么都画不出来"时才改变行为：`frame` 有值且不需要
+        # 淡化时，走的分支与原来完全一样（见上面的比对实验）。
+        if outgoing is not None and (frame is None or (ready and alpha < 1.0)):
             painter.setOpacity(1.0)
             self._draw_sprite(painter, outgoing)
 
         painter.setOpacity(alpha)
-        self._draw_sprite(painter, self.animator.current_frame())
+        self._draw_sprite(painter, frame)
         painter.setOpacity(1.0)
 
         if self.bubble or self.bubble_image is not None:
