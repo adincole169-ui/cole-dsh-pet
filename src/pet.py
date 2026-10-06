@@ -78,6 +78,9 @@ BUBBLE_SINK = 26
 NOTIFY_COOLDOWN = 90.0
 FPS_MS = 33
 DT = FPS_MS / 1000.0
+# 甩抛初速的**软上限**（px/s，再乘 `physics.throwPower`）。
+# `config.jsonc` 里一直写着这个 3600，但代码从没实现过（"文档写了、代码没做"）。
+THROW_SPEED_SOFT_CAP = 3600.0
 
 
 def screen_area_for(point):
@@ -794,6 +797,33 @@ class PetWindow(QWidget):
 
         重建只在帧/尺寸/气泡/挤压变化时发生。
         """
+        # **拖动期间必须让整个窗口都"可点"（= 不裁输入区域）。**
+        #
+        # 踩过，而且长期存在、自检看不见：拖动时**窗口在动、光标基本不动**，于是光标
+        # 很快落到角色掩膜**之外** —— 而掩膜之外的区域在 Windows 上**不再属于这个
+        # 窗口**，后续的鼠标移动事件就被投递给下层窗口了。后果：
+        #
+        #   * 宠物只跟着走了第一次那一格。实测 logs/drag.log：鼠标走 273~1154 px，
+        #     窗口只动 **2~3 px** —— 就是用户说的"拖不动 / 无法放在屏幕的任何地方"；
+        #   * 区域在"在掩膜内 / 在掩膜外"之间反复变化 → 反复重绘 —— "拖拽时闪烁"。
+        #
+        # 为什么以前没发现：所有自检都是**直接调用** `window.mouseMoveEvent(...)`，
+        # 绕过了 Qt/Win32 的事件投递，所以掩膜裁掉输入这件事在自检里根本不存在。
+        # 合成事件的"拖动成功"（68 px / 179 px）与真实鼠标的 2~3 px 就是这么来的差异。
+        #
+        # 拖动中用户本来就按着宠物，整个窗口可点没有副作用；松手后（`mouseReleaseEvent`
+        # 里会把 `dragging` 置假并再调一次本函数）立刻恢复精确掩膜。
+        if self.dragging:
+            key = ("dragging", self.width(), self.height())
+            if key == self._mask_key:
+                return
+            bitmap = solid_bitmap(b"\xff" * (self.width() * self.height()),
+                                  self.width(), self.height())
+            self.setMask(bitmap)
+            self._mask_key = key
+            self.mask_stats = self._mask_stats(bitmap)
+            return
+
         pad = int(self.top_pad)
         bubble = self.bubble_rect if (self.bubble or self.bubble_image is not None) else None
         frame = self.animator.current_frame()
@@ -1363,6 +1393,11 @@ class PetWindow(QWidget):
         start = self.drag_history[0][:2] if self.drag_history else (self.pos_x, self.pos_y)
         self.dragging = False
         self.press_pos = None
+        # **恢复精确掩膜。** 拖动期间为了让整窗继续接到鼠标事件，掩膜被放宽成整窗
+        # （见 `_apply_input_mask`）；松手后必须立刻裁回"角色 + 气泡"，否则那圈透明
+        # 区域会重新挡住下层应用——正是用户抱怨过的"占用区域太大"。
+        self._mask_key = None
+        self._apply_input_mask()
         # 记一行拖动诊断：位移为 0 还是没记，直接区分"没按到"与"按到了没动"
         self._log_drag(start, (self.pos_x, self.pos_y), moved)
         power = float(self.config.physics.get("throwPower", 1.0))
@@ -1379,6 +1414,18 @@ class PetWindow(QWidget):
                 elapsed = max(t1 - t0, DT)
                 self.vx = (x1 - x0) / elapsed * power
                 self.vy = (y1 - y0) / elapsed * power
+            # **软上限 3600（×throwPower）**：`config.jsonc` 里一直写着
+            # "甩抛初速与软上限 3600 整体 ×p"，但代码里**从来没有实现过** ——
+            # 又是一处"文档写了、代码没做"。它现在有实际作用：改用真实耗时之后，
+            # 一次极快的甩动（两个采样之间只有几毫秒）能算出上万 px/s，
+            # 那种速度下宠物会直接飞出屏幕（配合 gravity=0 / confineToScreen=false）。
+            # 按**速度矢量**钳制而不是分别钳 vx/vy，方向才不会在角落里被扭歪。
+            cap = THROW_SPEED_SOFT_CAP * power
+            speed = math.hypot(self.vx, self.vy)
+            if cap > 0 and speed > cap:
+                scale = cap / speed
+                self.vx *= scale
+                self.vy *= scale
             self.vy = min(self.vy, 0.0) if abs(self.vy) > 1400 else self.vy
             # **松手之后必须换段。** `play_drag()` 用的是 `loop=True`，
             # 循环动画的 `done` 永远不会置位，没人换段的话宠物会一直保持
