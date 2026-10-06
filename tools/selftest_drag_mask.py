@@ -73,6 +73,7 @@ def cover_detail(window):
 def main():
     from PyQt5.QtCore import QEvent, QPoint, Qt
     from PyQt5.QtGui import QMouseEvent
+    from PyQt5.QtWidgets import QWidget
 
     from config import load, pet_configs
     from frames import FrameStore
@@ -94,12 +95,12 @@ def main():
     centre = (window.width() // 2, window.height() // 2)
 
     print()
-    print("  自检：拖动期间选「整窗可点」策略、松手后恢复精确掩膜")
+    print("  自检：拖动靠 grabMouse() 抓鼠标，**不动掩膜**")
     print("  " + "=" * 74)
-    print("  注意：offscreen 平台上 setMask 不生效，所以本自检验的是**策略选择**；")
-    print("        真实 Windows 上的鼠标投递行为需要在有真实鼠标的机器上确认。")
+    print("  为什么不动掩膜：改掩膜 = 一次 Windows 区域变更，而改动时机正是按下与")
+    print("  松开 —— 那会让宠物「消失一瞬」。抓鼠标与掩膜无关，且可验证。")
 
-    # --- 1. 空闲：应当是精确掩膜 ------------------------------------------ #
+    # --- 1. 空闲：精确掩膜、没有抓鼠标 ------------------------------------ #
     window.dragging = False
     window._mask_key = None
     window._apply_input_mask()
@@ -108,27 +109,31 @@ def main():
     check("空闲时选**精确掩膜**（透明角落才会穿透）",
           mask_strategy(window) == "precise",
           "%s %s" % (mask_strategy(window), cover_detail(window)))
+    check("空闲时没有抓着鼠标", QWidget.mouseGrabber() is not window,
+          QWidget.mouseGrabber())
 
-    # --- 2. 按下之后必须切到整窗 ------------------------------------------ #
+    # --- 2. 按下：抓鼠标，且掩膜**不变** ---------------------------------- #
+    before_key = window._mask_key
     window.mousePressEvent(mouse(QEvent.MouseButtonPress, centre))
     app.processEvents()
     check("按下之后进入拖动状态", bool(window.dragging))
-    # 拖动中帧还在变（本来会按新帧重建精确掩膜），多推几帧确认不会被裁回去
+    check("**按下之后抓住了鼠标**（事件不再依赖掩膜）",
+          QWidget.mouseGrabber() is window, QWidget.mouseGrabber())
+    # 拖动中帧还在变：多推几帧，掩膜也不该因为"拖动中"而切换成整窗
     for _ in range(10):
         app.processEvents()
         window._apply_input_mask()
-    check("**拖动期间选整窗策略**（真实鼠标才不会丢事件）",
-          mask_strategy(window) == "whole",
+    check("拖动期间掩膜**没有被切换成整窗**（改掩膜会让画面闪）",
+          mask_strategy(window) == "precise",
           "%s %s" % (mask_strategy(window), cover_detail(window)))
 
-    # --- 3. 松手之后恢复 -------------------------------------------------- #
+    # --- 3. 松手：放开鼠标 ------------------------------------------------- #
     window.mouseReleaseEvent(mouse(QEvent.MouseButtonRelease, (centre[0] + 30,
                                                                centre[1] + 10)))
     app.processEvents()
     check("松手之后离开拖动状态", not window.dragging)
-    check("松手之后恢复**精确掩膜**（否则透明区会挡住下层应用）",
-          mask_strategy(window) == "precise",
-          "%s %s" % (mask_strategy(window), cover_detail(window)))
+    check("松手之后放开了鼠标", QWidget.mouseGrabber() is not window,
+          QWidget.mouseGrabber())
 
     window.close()
     store.close()
@@ -140,9 +145,11 @@ def main():
         for item in FAILED:
             print("     [失败] %s" % item)
         return 1
-    print("     [OK] 拖动中选整窗策略、松手后恢复精确掩膜")
-    print("     [提醒] 「Windows 是否因此继续投递鼠标事件」需要真实鼠标确认，")
-    print("            请在有真实鼠标的机器上拖一次宠物验证。")
+    print("     [OK] 拖动靠抓鼠标（不动掩膜）；掩膜始终保持精确")
+    print("     [提醒] offscreen 平台会打印「不支持抓鼠标」，所以这里验的是 Qt 侧的")
+    print("            抓取状态（`QWidget.mouseGrabber()`），不是系统层的抓取。")
+    print("            「真实鼠标拖动是否跟手、是否还闪」仍需在真机确认；")
+    print("            若不跟手，说明 grabMouse 在这台机器上不够，需要另想办法。")
     return 0
 
 

@@ -270,6 +270,11 @@ class PetWindow(QWidget):
         value = config.position.get("maskInvert")
         self.mask_invert = True if value is None else bool(value)
         self.mask_stats = None
+        # 见过的**最小**角色留白（左/右）。墙壁边界用它而不是当前帧的值：
+        # 当前帧的留白随动画变化，会让宠物在换动画时被往里推（见 `step_physics`）。
+        # 它只放宽、不收紧，所以边界只会向外扩。
+        self._inset_min_left = None
+        self._inset_min_right = None
         # 启动窗口期"按角色对齐"的绝对截止时刻（见 _settle_initial_placement）：
         # __init__ 里调 _place_initial 时还没有帧/掩膜，拿不到角色的真实左右留白，
         # 所以要等掩膜算好之后再对齐一次；`_settle_deadline` 在下面首次摆放后设置。
@@ -568,17 +573,28 @@ class PetWindow(QWidget):
             # 用**角色的可见边界**去贴屏幕边，而不是窗口矩形：窗口比角色宽，
             # 拿窗口贴边等于贴住那圈透明留白，角色会停在离屏幕边约一个留白的地方
             # （用户报的"最右侧了但没到屏幕最右"）。
-            inset_left, inset_right = self.character_insets()
-            if self.pos_x + inset_left < area.left():
-                self.pos_x = float(area.left() - inset_left)
+            #
+            # **但留白必须用"稳定值"，不能直接用当前帧的。** `character_insets()`
+            # 是**逐帧**算的（不同动画、甚至同一动画的不同姿势，角色宽度都不一样），
+            # 于是换一次动画边界就动一次：宠物刚被放到屏幕最左、下一段动画的角色更宽
+            # → `pos_x + inset_left < area.left()` 成立 → **被往里推**。
+            # 用户看到的就是"拖到边缘突然往里闪"，以及"待不住屏幕最左/最右"。
+            #
+            # 修法：记住见过的**最小留白**（= 最靠边的那个值），它只放宽、不收紧，
+            # 所以边界只会向外扩、永远不会把宠物往里搬。
+            # 修法：用 `wall_insets()` —— 它记住见过的**最小留白**（= 最靠边的那个
+            # 值），只放宽、不收紧，所以边界只会向外扩、永远不会把宠物往里搬。
+            bound_left, bound_right = self.wall_insets()
+            if self.pos_x + bound_left < area.left():
+                self.pos_x = float(area.left() - bound_left)
                 self.vx = -self.vx * float(self.config.physics.get("restitution", 0.78))
                 self.animator.facing = 1
                 # **移动动画要一起掉头**：只翻 facing／vx 不够 —— `move_vx` 是
                 # `start_move()` 里定死的，下一帧又按原方向发 `moved(...)`，宠物会
                 # 贴着墙把剩下的距离"走"完（DEVNOTES 第 29 条）。
                 self.animator.steer_move(1)
-            elif self.pos_x + self.width() - inset_right > area.right():
-                self.pos_x = float(area.right() - self.width() + inset_right)
+            elif self.pos_x + self.width() - bound_right > area.right():
+                self.pos_x = float(area.right() - self.width() + bound_right)
                 self.vx = -self.vx * float(self.config.physics.get("restitution", 0.78))
                 self.animator.facing = -1
                 self.animator.steer_move(-1)
@@ -663,6 +679,27 @@ class PetWindow(QWidget):
         """角色离窗口左右边缘的距离 (left, right)。用于按角色而不是窗口对齐屏幕边。"""
         left, right = self.character_bounds()
         return left, max(0.0, self.width() - right)
+
+    def wall_insets(self):
+        """**墙壁判定**用的留白 (left, right)。
+
+        与 `character_insets()` 的区别：这是**稳定值** —— 记住见过的**最小**留白
+        （= 角色最靠边的那个姿势），而且只放宽、不收紧。
+
+        为什么必须稳定：`character_insets()` 是逐帧算的（不同动画、甚至同一动画的
+        不同姿势宽度都不同），直接拿它做墙壁边界的话，换一次动画边界就动一次 ——
+        宠物刚被放到屏幕最左、下一段动画更宽，就会被**往里推**。用户看到的就是
+        "拖到边缘突然往里闪"以及"待不住屏幕最左/最右"。
+
+        代价是：当某一段动画的角色比"见过最窄的"更宽时，它会略微超出屏幕边缘。
+        这个取舍是有意的 —— 稳定比精确重要，而且用户明确要的是"能放到边上"。
+        """
+        left, right = self.character_insets()
+        self._inset_min_left = (left if self._inset_min_left is None
+                                else min(self._inset_min_left, left))
+        self._inset_min_right = (right if self._inset_min_right is None
+                                 else min(self._inset_min_right, right))
+        return self._inset_min_left, self._inset_min_right
 
     def _draw_sprite(self, painter, pixmap):
         """把一帧按当前尺寸与 Q 弹挤压画到画布上（脚底贴着 anchor）。"""
@@ -797,33 +834,17 @@ class PetWindow(QWidget):
 
         重建只在帧/尺寸/气泡/挤压变化时发生。
         """
-        # **拖动期间必须让整个窗口都"可点"（= 不裁输入区域）。**
+        # **拖动期间不要动掩膜。**
         #
-        # 踩过，而且长期存在、自检看不见：拖动时**窗口在动、光标基本不动**，于是光标
-        # 很快落到角色掩膜**之外** —— 而掩膜之外的区域在 Windows 上**不再属于这个
-        # 窗口**，后续的鼠标移动事件就被投递给下层窗口了。后果：
+        # 这里曾有一版：拖动中把掩膜放宽成整窗，靠"让光标始终落在窗口区域内"来保住
+        # 鼠标事件。它确实修好了拖动（用户确认"能跟手"），但**每次改掩膜都是一次
+        # Windows 区域变更**，而改动时机正好是按下与松开 —— 用户看到的就是
+        # "点下去会消失一瞬、松开也会"。
         #
-        #   * 宠物只跟着走了第一次那一格。实测 logs/drag.log：鼠标走 273~1154 px，
-        #     窗口只动 **2~3 px** —— 就是用户说的"拖不动 / 无法放在屏幕的任何地方"；
-        #   * 区域在"在掩膜内 / 在掩膜外"之间反复变化 → 反复重绘 —— "拖拽时闪烁"。
-        #
-        # 为什么以前没发现：所有自检都是**直接调用** `window.mouseMoveEvent(...)`，
-        # 绕过了 Qt/Win32 的事件投递，所以掩膜裁掉输入这件事在自检里根本不存在。
-        # 合成事件的"拖动成功"（68 px / 179 px）与真实鼠标的 2~3 px 就是这么来的差异。
-        #
-        # 拖动中用户本来就按着宠物，整个窗口可点没有副作用；松手后（`mouseReleaseEvent`
-        # 里会把 `dragging` 置假并再调一次本函数）立刻恢复精确掩膜。
-        if self.dragging:
-            key = ("dragging", self.width(), self.height())
-            if key == self._mask_key:
-                return
-            bitmap = solid_bitmap(b"\xff" * (self.width() * self.height()),
-                                  self.width(), self.height())
-            self.setMask(bitmap)
-            self._mask_key = key
-            self.mask_stats = self._mask_stats(bitmap)
-            return
-
+        # 现在改用 Qt 的标准机制：按下时 `grabMouse()`（见 `mousePressEvent`），
+        # 由系统把鼠标事件直接投给这个窗口，**与掩膜无关**，因此不需要改掩膜。
+        # 好处是这条契约**可验证**（`QWidget.mouseGrabber()`），不必靠"真实鼠标
+        # 试出来"——上一版就是因为只能在真机上验，才留下了这个副作用。
         pad = int(self.top_pad)
         bubble = self.bubble_rect if (self.bubble or self.bubble_image is not None) else None
         frame = self.animator.current_frame()
@@ -1371,6 +1392,18 @@ class PetWindow(QWidget):
             # 甩抛速度必须按**真实耗时**算，不能假设每帧隔 DT。
             self.drag_history = [(self.pos_x, self.pos_y, time.monotonic())]
             self.animator.play_drag()
+            # **抓鼠标**：由系统把后续鼠标事件直接投给这个窗口，**与窗口掩膜无关**。
+            #
+            # 为什么必须显式抓：掩膜把输入区域裁到了角色形状，而拖动时**窗口在动、
+            # 光标基本不动**，光标很快落到掩膜之外 —— 那里的区域不属于这个窗口，
+            # 事件就被投递给下层窗口了。实测 `logs/drag.log`：真实鼠标走
+            # 273~1154 px，窗口只动 **2~3 px**（"拖不动 / 放不住"）。
+            #
+            # 早先试过"拖动期间把掩膜放宽成整窗"来绕开它：拖动确实修好了，但
+            # **每次改掩膜都是一次 Windows 区域变更**，改动时机正是按下与松开 ——
+            # 于是"点下去消失一瞬、松开也消失一瞬"。`grabMouse()` 是 Qt 为这件事
+            # 提供的机制，不动掩膜，也就没有那个副作用。
+            self.grabMouse()
             event.accept()
 
     def mouseMoveEvent(self, event):
@@ -1393,11 +1426,9 @@ class PetWindow(QWidget):
         start = self.drag_history[0][:2] if self.drag_history else (self.pos_x, self.pos_y)
         self.dragging = False
         self.press_pos = None
-        # **恢复精确掩膜。** 拖动期间为了让整窗继续接到鼠标事件，掩膜被放宽成整窗
-        # （见 `_apply_input_mask`）；松手后必须立刻裁回"角色 + 气泡"，否则那圈透明
-        # 区域会重新挡住下层应用——正是用户抱怨过的"占用区域太大"。
-        self._mask_key = None
-        self._apply_input_mask()
+        # 放开鼠标抓取（见 `mousePressEvent` 里的 `grabMouse()`）。
+        # **不动掩膜** —— 拖动期间掩膜一直是精确的那一份，所以这里不需要恢复。
+        self.releaseMouse()
         # 记一行拖动诊断：位移为 0 还是没记，直接区分"没按到"与"按到了没动"
         self._log_drag(start, (self.pos_x, self.pos_y), moved)
         power = float(self.config.physics.get("throwPower", 1.0))
