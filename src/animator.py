@@ -62,6 +62,10 @@ class Playing(object):
         return self.animation is not None
 
     @property
+    def ready(self):
+        return self.animation is not None
+
+    @property
     def fps(self):
         source = self.source
         return source.fps if source is not None else FPS_FALLBACK
@@ -146,10 +150,6 @@ class Animator(QObject):
             self.next_auto()
             return
         self._heal()
-        if self.playing is None:
-            # `_heal()` 发现这一段加载失败、已经放弃它（见 `on_failed()`），
-            # 这一 tick 不能再往下走 —— 否则下面会对着 None 调 `advance()`。
-            return
         self.playing.advance(dt)
 
         # 位移：移动动画的前导秒数之后、收尾秒数之前才是真正在走
@@ -181,18 +181,7 @@ class Animator(QObject):
     # -- 选择下一段 ---------------------------------------------------------- #
     def _pick(self, names):
         """按权重/随机挑一个，尽量不和刚播过的重复。"""
-        # 只排除"最近加载失败过"的名字。
-        #
-        # 踩过：原先写的是 `[n for n in names if n and self.store.has(n) or n]`，
-        # 因为 `and` 的优先级高于 `or`，整个条件等价于 `self.store.has(n) or n`，
-        # 再因为 `or n` 兜底 —— **恒为真**，过滤从未生效（一个失败的名字会被无限重挑，
-        # 而每一次都会再起一个 worker）。
-        #
-        # 但**不能**要求 `has(n)`：没缓存的动画本来就要靠 `play()` 去后台加载，
-        # 要求已缓存会把所有还没解过的动画一次性排除掉。
-        is_failed = getattr(self.store, "is_failed", None)
-        candidates = [n for n in names
-                      if n and not (callable(is_failed) and is_failed(n))]
+        candidates = [n for n in names if n and self.store.has(n) or n]
         if not candidates:
             return None
         pool = [n for n in candidates if n not in self.recent[-2:]] or candidates
@@ -340,34 +329,8 @@ class Animator(QObject):
             self.playing.animation = cached
             self.playing.elapsed = 0.0
             return
-        is_failed = getattr(self.store, "is_failed", None)
-        if callable(is_failed) and is_failed(name):
-            # 这一段**取不到帧**（文件缺失、解码失败…）：换下一段，
-            # 而不是每 tick 重试、让宠物永久定格在上一段的最后一帧。
-            self.on_failed(name)
-            return
         if not self.store.is_loading(name):
             self.store.request(name)
-
-    def on_failed(self, name):
-        """后台加载失败：若这正是当前等待的动画，就放弃它、换下一段。
-
-        为什么必须有人接 `FrameStore.failed`：原先这个信号**没有任何接收者**，
-        而 `Playing.advance()` 在"没有帧"时不推进时间，`done` 永远不会置位 ——
-        动画链就此停住，宠物**永久定格**在上一段的最后一帧。
-        同时 `_heal()` 每 33 ms 重试一次，每秒新开约 30 个线程。
-
-        （对照测试：tools/selftest_anim_failure.py）
-        """
-        if self.playing is None or self.playing.name != name or self.playing.ready:
-            return
-        if self.work_status == "anim:" + name:
-            self.work_status = None
-        self.playing = None
-        self.move = None
-        self.move_vx = 0.0
-        self.moved.emit(0.0, False)
-        self.next_auto()
 
     def start_move(self, spec):
         """开始一段带真实位移的移动动画。

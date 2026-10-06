@@ -79,9 +79,7 @@ def main():
         return 1
 
     area = window.current_screen_area()
-    # 用**墙壁判定自己的**边界（稳定值），而不是当前帧的留白 —— 两者在换动画时
-    # 会不同，用错的话宠物根本没贴在墙上，自检就变成空转（实测踩过）。
-    insets = window.wall_insets()
+    insets = window.character_insets()
     # 把宠物摆到"右边缘正好贴住屏幕右缘"的位置，并且朝右走 —— 一迈步就撞墙
     window.pos_x = float(area.right() - window.width() + insets[1])
     window.pos_y = float(area.top() + area.height() * 0.4)
@@ -123,11 +121,8 @@ def main():
     print("  向左走出        %.1f px" % travelled)
     print("  最长「在走却不动」连续帧数 = %d" % worst_stuck)
     print()
-    # 详情文案在**通过时不该显示**失败原因（第一版传的是"没撞到墙 —— 起始位置或
-    # 距离不合适"，于是"OK 确实撞到过墙"后面跟着一句否定的话，读起来自相矛盾）。
     check("确实撞到过墙（否则这个自检没意义）", collided,
-          "检测到 %d 帧「在走却不动」= 撞墙瞬间" % worst_stuck if collided
-          else "没撞到墙 —— 起始位置或距离不合适")
+          "没撞到墙 —— 起始位置或距离不合适")
     check("撞墙后没有长时间顶墙（最长 < 8 帧）", worst_stuck < 8,
           "最长 %d 帧" % worst_stuck)
     check("撞墙后确实离开了墙（向左 > 30px）", travelled > 30.0,
