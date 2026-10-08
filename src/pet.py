@@ -275,6 +275,11 @@ class PetWindow(QWidget):
         # 这里**不能**再留一个 `_placed_at` 之类的字段 —— 那个旧写法每次对齐都续期，
         # 导致窗口永不结束（用户报的"拖不动、松手回出生点"）。
         self._settle_deadline = None
+        # 已接上"几何/DPI 变化"信号的屏（见 `_bind_display_changes`）。
+        # **必须在这里先建好**：`_on_display_changed` 会读它 —— 若只在绑定函数里创建，
+        # 那么"压根没绑定成功"时处理函数会整段抛异常、又被自己的 try/except 吞掉，
+        # 表现为"监听了但毫无作用"（反向验证时就是这么暴露出来的）。
+        self._watched_screens = set()
         self.mood_signal.connect(self.on_bridge_message)
 
         # --- 窗口 ----------------------------------------------------------- #
@@ -318,7 +323,93 @@ class PetWindow(QWidget):
 
         self._build_menu()
         self._build_tray()
+        self._bind_display_changes()
         self.animator.next_auto()
+
+    # -- 显示环境变化 ---------------------------------------------------------- #
+    def _bind_display_changes(self):
+        """把"显示环境变了"接上：改缩放 / 改分辨率 / 拔插显示器。
+
+        为什么需要：进程启动时会把屏幕参数读一遍，之后这些变化**不会自动纠正**桌宠的
+        位置与边界。实测踩过一次：桌宠以为屏幕只有 1280×720（真实 2560×1440），
+        于是"只能放在左上角、右边和下面都放不了"，**重启才恢复**。
+
+        接的信号：
+          * 应用级：`screenAdded` / `screenRemoved` / `primaryScreenChanged`；
+          * 每块屏：`geometryChanged` / `availableGeometryChanged` /
+            `logicalDotsPerInchChanged` / `physicalDotsPerInchChanged`。
+            （用 `getattr` 取，Qt 版本不同有的信号不存在，缺了就跳过而不是崩。）
+
+        各平台的信号数量/时机不完全一样，所以处理函数做成**幂等**的：只在宠物真的
+        落在当前可用区之外时才动它，避免平白把它挪走。
+        """
+        app = QApplication.instance()
+        if app is None:
+            return
+        # **不要在这里才建 `_watched_screens`**：`_on_display_changed` 会读它。
+        # 若只在绑定函数里创建，那么"压根没绑定成功"时处理函数会整段抛异常、再被
+        # 自己的 try/except 吞掉 —— 表现为"监听了但毫无作用"（反向验证时就是这么
+        # 暴露的）。字段改在 `__init__` 里先建好。
+        if not hasattr(self, "_watched_screens"):
+            self._watched_screens = set()
+        for name in ("screenAdded", "screenRemoved", "primaryScreenChanged"):
+            signal = getattr(app, name, None)
+            if signal is not None:
+                try:
+                    signal.connect(self._on_display_changed)
+                except Exception:
+                    pass
+        self._watch_all_screens()
+
+    def _watch_all_screens(self):
+        """给每块**还没监听过的**屏接上几何/DPI 变化信号。"""
+        app = QApplication.instance()
+        if app is None:
+            return
+        for screen in app.screens():
+            if screen in self._watched_screens:
+                continue
+            self._watched_screens.add(screen)
+            for name in ("geometryChanged", "availableGeometryChanged",
+                         "logicalDotsPerInchChanged", "physicalDotsPerInchChanged"):
+                signal = getattr(screen, name, None)
+                if signal is None:
+                    continue
+                try:
+                    signal.connect(self._on_display_changed)
+                except Exception:
+                    pass
+
+    def _on_display_changed(self, *_args):
+        """显示环境变化时的处理：把宠物拉回**当前**屏幕的可用区内。
+
+        判据是"窗口有多少落在可用区之外"：完全在里面就**什么都不做**（不打扰用户
+        已经摆好的位置），出界了才按最小位移挪回来。
+        """
+        try:
+            self._watch_all_screens()          # 新插上的屏也要监听
+            if getattr(self, "pos_x", None) is None:
+                return
+            area = self.current_screen_area()
+            width, height = self.width(), self.height()
+            left = max(area.left(), min(self.pos_x, area.right() - width + 1))
+            top = max(area.top(), min(self.pos_y, area.bottom() - height + 1))
+            if abs(left - self.pos_x) < 1.0 and abs(top - self.pos_y) < 1.0:
+                return                          # 本来就在里面，别动它
+            sys.stderr.write(
+                "dsh-pet: 显示环境变化，把宠物从 (%.0f,%.0f) 挪回可用区内 (%.0f,%.0f)\n"
+                % (self.pos_x, self.pos_y, left, top))
+            self._user_took_over()              # 之后别再按启动期的角落对齐搬它
+            self.pos_x, self.pos_y = float(left), float(top)
+            self.vx = 0.0
+            self.vy = 0.0
+            self._mask_key = None               # 尺寸/区域可能都变了，重建掩膜
+            self.move(int(self.pos_x), int(self.pos_y))
+            self._apply_input_mask()
+            self.update()
+        except Exception as error:
+            # 显示变化处理失败不该带崩桌宠 —— 但也不静默吞掉（那种坑踩过）
+            sys.stderr.write("dsh-pet: 处理显示变化时出错（已忽略）: %s\n" % error)
 
     # -- 时钟 ---------------------------------------------------------------- #
     def _repaint(self):
