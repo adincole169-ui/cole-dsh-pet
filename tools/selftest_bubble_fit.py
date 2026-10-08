@@ -119,6 +119,23 @@ def main():
                       % ("(%d,%d %dx%d)" % (rect.left(), rect.top(),
                                             rect.width(), rect.height())
                          if rect is not None else None, mask_rect))
+                # E：**画字用的字体必须与量尺寸用的那份一致**。
+                #
+                # 这是"气泡装不下文字"的真正成因（原版一直如此）：量的时候用
+                # `QFont(FONT_FAMILY, 9)`，画的时候却用画笔画笔当前字体（应用默认），
+                # 实测后者宽 20%，文字就越出气泡。这条断言值钱在于它的失效**看不出来**：
+                # 两边代码都正常，只有渲染出来才知道。`_draw_bubble` 会把实际用到的字体
+                # 记在 `bubble_font_used` 上。
+                used = getattr(window, "bubble_font_used", None)
+                want = layout["font"]
+                font_ok = (used is not None
+                           and used.family() == want.family()
+                           and used.pointSize() == want.pointSize())
+                check("%s 画字字体 == 量尺寸字体" % tag, font_ok,
+                      "实际 %s %spt / 期望 %s %spt"
+                      % (used.family() if used else None,
+                         used.pointSize() if used else None,
+                         want.family(), want.pointSize()))
                 window.clear_bubble()
                 app.processEvents()
             summary.append((size, label, box_w, box_h))

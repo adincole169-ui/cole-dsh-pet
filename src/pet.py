@@ -1007,6 +1007,21 @@ class PetWindow(QWidget):
             text_x = image_x + sticker + gap
 
         painter.setPen(QColor(233, 240, 255))
+        # **必须把画笔字体设成量尺寸用的那一份。**
+        #
+        # 踩过（而且是原版就有的老问题）：上面按 `QFont(FONT_FAMILY, 9)` 量文字宽度
+        # 来定气泡大小，而 `drawText` 用的是**画笔当前的字体** —— 全项目里从来没有
+        # 任何一处调用过 `painter.setFont`，于是画出来是应用默认字体。
+        #
+        # 实测（tools/probe_bubble_overflow.py，真实平台）：
+        #     量尺寸用 Microsoft YaHei UI 9pt，画笔默认 SimSun 11pt
+        #     同一句话：量出来 360 px，实际画出来 432 px —— **宽 20%**
+        #     后果就是文字越出气泡（size=320 时右边越界 5px、size=160 时顶到外面）。
+        painter.setFont(layout["font"])
+        # 记下**实际用于绘制**的字体：自检据此断言"量尺寸的字体 == 画字的字体"。
+        # 这条不变量值钱，因为它的失效**看不出来**——量的时候一种字体、画的时候另一种，
+        # 代码里两边都很正常，只有渲染出来才知道文字越出了气泡。
+        self.bubble_font_used = QFont(painter.font())
         block_h = line_h * len(lines)
         first_baseline = box_y + (box_h - block_h) / 2.0 + line_h - metrics.descent() - 1
         for index, line in enumerate(lines):
