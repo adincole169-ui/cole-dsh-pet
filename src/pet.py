@@ -67,13 +67,20 @@ SETTLE_WINDOW_SEC = 4.0
 # 这套素材的"透明"是**低 alpha**而不是 0（背景 alpha 1–8、角色约 17% 面积），
 # 所以阈值要卡在两者之间；取太小会把背景也算成实心，取太大则会把角色边缘裁掉。
 MASK_ALPHA_MIN = 16
-# 气泡里表情包画成多大（像素）。原来按气泡高度放大到约 50px，用户觉得太大。
+# 气泡里表情包画成多大（像素，参考尺寸下）
 STICKER_SIZE = 38
-# 气泡尖角与头顶之间留的空隙（像素）
+# 气泡尖角与头顶之间留的空隙（像素，参考尺寸下）
 BUBBLE_TAIL_GAP = 6
-# 气泡再往画面里压多少像素。精灵帧顶部自带约 31px 透明边（实测占帧高 17.4%~17.8%），
-# 压进这段透明区之后，视觉上气泡就贴着头发了，而不会盖住脸。
+# 气泡再往画面里压多少像素（参考尺寸下）。精灵帧顶部自带约 31px 透明边（实测占帧高
+# 17.4%~17.8%），压进这段透明区之后，视觉上气泡就贴着头发了，而不会盖住脸。
 BUBBLE_SINK = 26
+# 上面这些气泡尺寸常量都是按 `size = 320` 调的。宠物能通过 `size` 调大调小，
+# 气泡要跟着一起缩放，所以把参考尺寸记下来当基准：
+#     scale = size_px / BUBBLE_REFERENCE_SIZE
+# （用户报过："气泡大小始终是固定的，而不是和桌宠的大小一样可以调节"。）
+BUBBLE_REFERENCE_SIZE = 320.0
+# 气泡字号（参考尺寸下的磅值）。原先写死在两处 `QFont(FONT_FAMILY, 9)` 里。
+BUBBLE_FONT_PT = 9
 # 系统通知的最小间隔（秒）。DSH 状态变化很频繁，不限流会刷屏。
 NOTIFY_COOLDOWN = 90.0
 FPS_MS = 33
@@ -934,53 +941,49 @@ class PetWindow(QWidget):
     def _draw_bubble(self, painter, width):
         """气泡：左侧可选配图 + 右侧文字，整体画在精灵上方。
 
-        配图放在**左侧**、按 `STICKER_SIZE` 画成小图（原来是横向铺满气泡的 50px，
-        用户觉得"太大"）。小图竖排在文字旁边，气泡因此也更窄。
+        配图放在**左侧**、按 `STICKER_SIZE`（随尺寸缩放）画成小图（原来是横向铺满
+        气泡的 50px，用户觉得"太大"）。小图竖排在文字旁边，气泡因此也更窄。
+
+        排版全部从 `bubble_layout()` 取 —— 与算留白（`bubble_size`）用的是同一份，
+        否则"算出来的高度"和"画出来的高度"会不一致（历史上就错过一次）。
         """
-        area = QRectF(4, 2, self.width() - 8, max(24.0, self.top_pad - 6.0))
         has_image = self.bubble_image is not None and not self.bubble_image.isNull()
-
         text = self.bubble[0] if self.bubble else ""
-        font = QFont(FONT_FAMILY, 9)
-        metrics = QFontMetrics(font)
+        layout = self.bubble_layout(text, has_image)
+        metrics = layout["metrics"]
+        lines = layout["lines"]
+        line_h = layout["line_h"]
+        sticker = layout["sticker"]
+        gap = layout["gap"]
+        box_w = layout["box_w"]
+        box_h = layout["box_h"]
+        text_pad = layout["text_pad"]
+        scale = layout["scale"]
+        tail_gap = max(1.0, BUBBLE_TAIL_GAP * scale)
+        sink = BUBBLE_SINK * scale
 
-        # 配图固定边长（不再随气泡高度放大），并给文字让出宽度
-        sticker = STICKER_SIZE if has_image else 0
-        gap = 5 if has_image else 0
-        max_w = max(40, self.width() - 28 - sticker - gap)
-
-        lines, current = [], ""
-        for char in text:
-            if metrics.width(current + char) > max_w:
-                lines.append(current)
-                current = char
-            else:
-                current += char
-        if current or not lines:
-            lines.append(current)
-
-        line_h = metrics.height()
-        text_w = max([metrics.width(line) for line in lines] or [0])
-        box_w = min(self.width() - 8, sticker + gap + text_w + 18)
-        box_h = max(sticker, line_h * len(lines)) + 12
+        area = QRectF(4, 2, self.width() - 8, max(24.0, self.top_pad - 6.0))
         box_x = (self.width() - box_w) / 2.0
         # 气泡紧贴留白区下沿：留白高度就是按气泡算出来的（见 `bubble_size`），
         # 所以这样画出来必然是"离本体最近"。不再去推"角色头顶在第几像素"——
         # 之前用帧内透明边比例去估，结果气泡在渲染里跑到了窗口顶部。
         # `BUBBLE_SINK` 让它再往画面里压一点：精灵帧顶部自带约 31px 透明边，
         # 压进这段透明区之后，视觉上气泡就贴着头发了（不会盖住脸）。
-        box_y = self.top_pad - box_h - BUBBLE_TAIL_GAP + BUBBLE_SINK
+        box_y = self.top_pad - box_h - tail_gap + sink
         if box_y < 0:
             box_y = 0.0
         if box_y + box_h > self.height():
             box_y = max(0.0, self.height() - box_h)
 
         path = QPainterPath()
-        path.addRoundedRect(QRectF(box_x, box_y, box_w, box_h), 9, 9)
+        path.addRoundedRect(QRectF(box_x, box_y, box_w, box_h),
+                            layout["radius"], layout["radius"])
+        tail_w = max(3.0, 7.0 * scale)
+        tail_h = max(3.0, 7.0 * scale)
         tail = QPainterPath()
-        tail.moveTo(self.width() / 2.0 - 7, box_y + box_h - 1)
-        tail.lineTo(self.width() / 2.0, box_y + box_h + 7)
-        tail.lineTo(self.width() / 2.0 + 7, box_y + box_h - 1)
+        tail.moveTo(self.width() / 2.0 - tail_w, box_y + box_h - 1)
+        tail.lineTo(self.width() / 2.0, box_y + box_h + tail_h)
+        tail.lineTo(self.width() / 2.0 + tail_w, box_y + box_h - 1)
         path.addPath(tail)
 
         painter.setPen(Qt.NoPen)
@@ -992,11 +995,12 @@ class PetWindow(QWidget):
 
         # 记下气泡的**实际矩形**：输入掩膜要用它，而不是整条横带。
         # 用整条横带会让可点比例从 0.26 涨到 0.95，等于白做掩膜。
-        self.bubble_rect = QRectF(box_x, box_y, box_w, box_h + 8)
+        self.bubble_rect = QRectF(box_x, box_y, box_w,
+                                  box_h + max(8.0, 8.0 * scale))
 
-        text_x = box_x + 9
+        text_x = box_x + text_pad
         if has_image:
-            image_x = box_x + 9
+            image_x = box_x + text_pad
             image_y = box_y + (box_h - sticker) / 2.0
             painter.drawPixmap(QRectF(image_x, image_y, sticker, sticker),
                                self.bubble_image, QRectF(self.bubble_image.rect()))
@@ -1020,18 +1024,41 @@ class PetWindow(QWidget):
         self.move(int(self.pos_x), int(self.pos_y))
 
     # -- 联动桥 -------------------------------------------------------------- #
-    def bubble_size(self, text, has_image):
-        """按当前文本与是否有配图算出气泡的尺寸（与 `_draw_bubble` 用同一套规则）。
+    def ui_scale(self):
+        """气泡/字号相对参考尺寸的缩放系数。
 
-        单独提出来是因为留白高度要用它：**留白 = 气泡高度**，气泡再贴着留白下沿画，
-        这样气泡距本体必然是最近的，不需要去猜"角色头顶在哪一像素"——先前就是靠猜
-        （用帧内透明边的比例去推），结果气泡在渲染里落到了窗口顶部。
+        宠物大小由 `size_px` 决定（`sprite_size()` 用它算精灵绘制尺寸），而气泡的
+        每一项（字号、配图边长、内外边距、尖角空隙）原先都是**写死的常量** —— 于是
+        宠物能调大调小、气泡永远一样大（用户报的正是这个）。
         """
-        font = QFont(FONT_FAMILY, 9)
+        size = float(getattr(self, "size_px", 0) or 0)
+        if size <= 0:
+            size = BUBBLE_REFERENCE_SIZE
+        return max(0.4, min(4.0, size / BUBBLE_REFERENCE_SIZE))
+
+    def bubble_layout(self, text, has_image):
+        """气泡的排版：**尺寸计算与绘制共用这一份**。
+
+        为什么合并：`bubble_size()` 与 `_draw_bubble()` 原先各自写了一份完全相同的
+        排版规则（字号、配图、换行、box 尺寸）。两处必须逐字一致才不会错位，而加入
+        "随宠物尺寸缩放"之后更容易走偏 —— 所以合并成唯一一份，绘制与算留白都读它。
+
+        返回一个 dict；其中 `box_w/box_h` 是气泡本体尺寸，`box_x/box_y/文本位置`
+        由绘制方算（它们还依赖 `top_pad`）。
+        """
+        scale = self.ui_scale()
+        font = QFont(FONT_FAMILY, max(5, int(round(BUBBLE_FONT_PT * scale))))
         metrics = QFontMetrics(font)
-        sticker = STICKER_SIZE if has_image else 0
-        gap = 5 if has_image else 0
-        max_w = max(40, self.width() - 28 - sticker - gap)
+        sticker = int(round(STICKER_SIZE * scale)) if has_image else 0
+        gap = int(round(5 * scale)) if has_image else 0
+        margin_x = int(round(28 * scale))
+        pad_x = int(round(18 * scale))
+        pad_y = int(round(12 * scale))
+        edge = int(round(8 * scale))
+        text_pad = int(round(9 * scale))
+        radius = max(3.0, 9.0 * scale)
+
+        max_w = max(int(round(40 * scale)), self.width() - margin_x - sticker - gap)
         lines, current = [], ""
         for char in text or "":
             if metrics.width(current + char) > max_w:
@@ -1041,11 +1068,31 @@ class PetWindow(QWidget):
                 current += char
         if current or not lines:
             lines.append(current)
+
         line_h = metrics.height()
         text_w = max([metrics.width(line) for line in lines] or [0])
-        box_w = min(self.width() - 8, sticker + gap + text_w + 18)
-        box_h = max(sticker, line_h * len(lines)) + 12
-        return box_w, box_h
+        # 宽度要**保证**装得下最宽的那一行：右边距与左边距对称（都是 text_pad），
+        # 所以总宽 = 左边距 + 配图 + 间隙 + 文字 + 右边距。
+        box_w = min(self.width() - edge,
+                    text_pad + sticker + gap + text_w + text_pad)
+        box_h = max(sticker, line_h * len(lines)) + pad_y
+        return {
+            "scale": scale, "font": font, "metrics": metrics,
+            "lines": lines, "line_h": line_h, "text_w": text_w,
+            "sticker": sticker, "gap": gap, "radius": radius,
+            "text_pad": text_pad, "pad_y": pad_y,
+            "box_w": box_w, "box_h": box_h,
+        }
+
+    def bubble_size(self, text, has_image):
+        """按当前文本与是否有配图算出气泡的尺寸（与绘制共用 `bubble_layout`）。
+
+        单独提出来是因为留白高度要用它：**留白 = 气泡高度**，气泡再贴着留白下沿画，
+        这样气泡距本体必然是最近的，不需要去猜"角色头顶在哪一像素"——先前就是靠猜
+        （用帧内透明边的比例去推），结果气泡在渲染里落到了窗口顶部。
+        """
+        layout = self.bubble_layout(text, has_image)
+        return layout["box_w"], layout["box_h"]
 
     def say(self, text, image=None, seconds=6.0):
         text = (text or "").strip()
@@ -1054,11 +1101,29 @@ class PetWindow(QWidget):
         else:
             self.bubble_image = None
         has_image = self.bubble_image is not None and not self.bubble_image.isNull()
-        # 留白 = 气泡高度 + 一点余量（容纳尖角），气泡就在这段里贴着下沿画
+        # 留白 = 气泡高度 + 一点余量（容纳尖角），气泡就在这段里贴着下沿画。
+        #
+        # **余量必须跟着尺寸缩放**：`_draw_bubble` 会把气泡画在
+        # `top_pad - box_h - tail_gap + sink` 处，若留白比 `box_h + tail_gap` 小，
+        # `box_y` 就被钳到 0、气泡被挤进精灵区域 —— 表现出来就是"文字装不进气泡"。
+        scale = self.ui_scale()
         _box_w, box_h = self.bubble_size(text, has_image)
-        need = int(box_h + BUBBLE_TAIL_GAP + 4) if text else 0
+        need = int(box_h + BUBBLE_TAIL_GAP * scale + 4 * scale) if text else 0
         self._apply_top_pad(need)
         self.bubble = [text, float(seconds)] if text else None
+        # **立刻把掩膜同步过去。**
+        #
+        # `setMask` 不只限制点击，它**同时裁掉绘制**（这是它的既定行为，见
+        # `_build_input_bitmap` 的说明）。而 `self.bubble_rect` 是在 `paintEvent`
+        # 里才算出来的 —— 也就是说气泡出现后的**第一帧**，掩膜还是旧的、不包含气泡，
+        # 这段文字会被裁掉；之后那一帧才补上。表现就是"气泡装不下文字 / 文字被切"。
+        #
+        # 这里强制同步一次：先 `repaint()` 让 `paintEvent` 把 `bubble_rect` 算出来，
+        # 再让掩膜按新矩形重建。`_mask_key` 置空是为了绕开"尺寸没变就跳过重建"的短路。
+        self._mask_key = None
+        self.repaint()
+        self._mask_key = None
+        self._apply_input_mask()
         self.update()
         return box_h
 
