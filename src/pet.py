@@ -754,14 +754,54 @@ class PetWindow(QWidget):
         left, right = self.character_bounds()
         return left, max(0.0, self.width() - right)
 
+    def sprite_layers(self):
+        """`paintEvent` 这一帧要画的层：`[(帧, 不透明度), ...]`。
+
+        **掩膜必须与它用同一份判断。** `setMask` 不只裁输入，它**同时裁绘制** ——
+        掩膜里没有的区域连画都画不出来。所以"画了什么"和"掩膜覆盖什么"一旦各写一遍
+        就会漂移，而这条漂移真实发生过：
+
+          * 155587f 让"新段这一帧还没有"时也铺垫层（修"动作切换时消失一瞬"）；
+          * `_apply_input_mask` 当时仍是"没有 current_frame 就什么都不画"，
+            于是把掩膜塌成"只剩气泡"（实测 cover 0.27 -> 0.047，rect 变成气泡的
+            `[110, 30, 100, 32]`，持续约 0.3 秒）；
+          * 结果 `paintEvent` 铺的垫层被掩膜裁掉 —— 角色**照样**消失 0.3 秒。
+
+        `tools/probe_switch_blank.py` 当时看不见这个问题，因为它跑在 offscreen 平台，
+        而那个平台不支持 `setMask`（它会打印 "does not support setting window masks"）：
+        修复后的探针改成同时核对本函数与掩膜来源，见那里。
+
+        顺带也就是绘制条件本身（原 `paintEvent` 里的注释）：
+
+        **垫层要盖住两种时刻**：①新段正在淡入（`alpha < 1`）；②**新段这一帧还没有**
+        （`frame is None`）。第②种原先漏了：条件里要求 `ready`，而"新段还在加载 /
+        那一帧还没被生产出来"恰恰 **不 ready** —— 于是垫层被跳过，接着又画了个
+        `None`，屏幕上**什么都没有**。实测（同一探针，连续切换 8 次 / 320 帧）：
+        降内存之前会看不见的帧 0，之后 35；修好这条后 0。
+        """
+        outgoing = self.animator.outgoing_frame()
+        alpha = self.animator.fade_alpha()
+        ready = self.animator.playing is not None and self.animator.playing.ready
+        frame = self.animator.current_frame()
+        layers = []
+        if outgoing is not None and (frame is None or (ready and alpha < 1.0)):
+            layers.append((outgoing, 1.0))
+        if frame is not None and not frame.isNull():
+            layers.append((frame, alpha))
+        return layers
+
     def _draw_sprite(self, painter, pixmap):
         """把一帧按当前尺寸与 Q 弹挤压画到画布上（脚底贴着 anchor）。"""
         if pixmap is None or pixmap.isNull():
             return
         painter.drawPixmap(self.sprite_rect(), pixmap, QRectF(pixmap.rect()))
 
-    def _build_input_bitmap(self, frame, rect, bubble):
+    def _build_input_bitmap(self, frames, rect, bubble):
         """按**当前绘制矩形**尺寸算出输入掩膜。
+
+        `frames` 是**这一帧真的要画出来的所有层**（见 `sprite_layers()`）：新段还没
+        就绪时只有垫层，交叉淡入过程中两层都在。掩膜取它们的**并集** —— `setMask`
+        同时裁绘制，只按其中一层算，另一层画出来的部分就会被裁掉。
 
         关键是顺序：**先把画面缩放到绘制尺寸，再在该尺寸上做一次阈值**。反过来
         （在原始分辨率算掩膜、再用 `QBitmap.transformed` 缩放 1bpp 位图）在这台机器上
@@ -775,12 +815,18 @@ class PetWindow(QWidget):
         box_h = max(1, int(round(rect.height())))
         left = int(round(rect.left())) - margin
         top = int(round(rect.top()))
+        # 整窗尺寸**先取好**：没有 numpy 的退回分支也要用。原先它在 `try` 里面赋值，
+        # numpy 缺失时那段会 NameError —— 只在没装 numpy 的机器上才暴露。
+        width, height = self.width(), self.height()
 
         # 按绘制尺寸重采样，再取 alpha 阈值——这是唯一一次逐像素运算
-        scaled = frame.toImage().convertToFormat(QImage.Format_ARGB32)
-        if scaled.width() != box_w or scaled.height() != box_h:
-            scaled = scaled.scaled(box_w, box_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        solid = self._threshold_bytes(scaled)
+        solids = []
+        for frame in frames:
+            scaled = frame.toImage().convertToFormat(QImage.Format_ARGB32)
+            if scaled.width() != box_w or scaled.height() != box_h:
+                scaled = scaled.scaled(box_w, box_h, Qt.IgnoreAspectRatio,
+                                       Qt.SmoothTransformation)
+            solids.append(self._threshold_bytes(scaled))
 
         # 拼成整窗掩膜。**用 numpy 直接填**，不走 QPainter：
         # `QPainter.fillRect` 在 `Format_Grayscale8` 画布上实测**完全不生效**
@@ -792,7 +838,6 @@ class PetWindow(QWidget):
         # 合成时**必须取逐点较大值**，不能直接覆盖：精灵在气泡那一段是透明的
         # （阈值后为 0），直接覆盖会把气泡的"可点"抹掉。实测后果是气泡掩膜只剩
         # 上半 30px，下半截被透明像素覆盖，表现为"气泡下面一小部分被遮挡"。
-        width, height = self.width(), self.height()
         try:
             import numpy as np
             canvas = np.zeros((height, width), dtype=np.uint8)
@@ -806,12 +851,15 @@ class PetWindow(QWidget):
                 bx1 = min(width, int(bubble.right()) + 1)
                 if by1 > by0 and bx1 > bx0:
                     canvas[by0:by1, bx0:bx1] = 255
-            solid_array = np.frombuffer(solid, dtype=np.uint8).reshape(box_h, box_w)
             sy0 = max(0, top)
             sy1 = min(height, top + box_h)
             sx0 = max(0, left)
             sx1 = min(width, left + box_w)
-            if sy1 > sy0 and sx1 > sx0:
+            # 每一层都并进来：画出来的东西都必须可点、也都必须不被掩膜裁掉
+            for solid in solids:
+                if sy1 <= sy0 or sx1 <= sx0:
+                    continue
+                solid_array = np.frombuffer(solid, dtype=np.uint8).reshape(box_h, box_w)
                 piece = solid_array[sy0 - top:sy1 - top, sx0 - left:sx1 - left]
                 np.maximum(canvas[sy0:sy1, sx0:sx1], piece,
                            out=canvas[sy0:sy1, sx0:sx1])
@@ -825,20 +873,21 @@ class PetWindow(QWidget):
                     end = min(width, int(bubble.right()) + 1)
                     if end > start:
                         canvas[row * width + start:row * width + end] = b"\xff" * (end - start)
-            for row in range(box_h):
-                target = top + row
-                if target < 0 or target >= height:
-                    continue
-                line = solid[row * box_w:(row + 1) * box_w]
-                start = max(0, left)
-                end = min(width, left + box_w)
-                if end <= start:
-                    continue
-                offset = start - left
-                for column in range(start, end):
-                    value = line[offset + column - start]
-                    if value > canvas[target * width + column]:
-                        canvas[target * width + column] = value
+            for solid in solids:                  # 每一层都并进来（与 numpy 分支同一规则）
+                for row in range(box_h):
+                    target = top + row
+                    if target < 0 or target >= height:
+                        continue
+                    line = solid[row * box_w:(row + 1) * box_w]
+                    start = max(0, left)
+                    end = min(width, left + box_w)
+                    if end <= start:
+                        continue
+                    offset = start - left
+                    for column in range(start, end):
+                        value = line[offset + column - start]
+                        if value > canvas[target * width + column]:
+                            canvas[target * width + column] = value
             payload = bytes(canvas)
 
         return solid_bitmap(payload, width, height)
@@ -889,8 +938,14 @@ class PetWindow(QWidget):
         """
         pad = int(self.top_pad)
         bubble = self.bubble_rect if (self.bubble or self.bubble_image is not None) else None
-        frame = self.animator.current_frame()
-        if frame is None or frame.isNull():
+        # **掩膜的输入是"将要画出来的东西"，与 `paintEvent` 同一个来源**
+        # （`sprite_layers()`）。早先这里直接看 `current_frame()`：切动作之后它有约
+        # 0.3 秒是 None，掩膜于是塌成"只剩气泡"（实测 cover 0.27 -> 0.047，rect 变成
+        # 气泡的 [110, 30, 100, 32]）—— 而 `setMask` 同时裁绘制，`paintEvent` 铺的
+        # 垫层被裁掉，角色**照样**消失约 0.3 秒。用户报的"切换动画有闪烁"就是这个：
+        # 垫层那条修复必须让掩膜跟着一起走，否则屏幕上等于没修。
+        layers = [layer for layer, _opacity in self.sprite_layers()]
+        if not layers:
             key = ("noframe", self.width(), self.height(), pad)
             if key == self._mask_key:
                 return
@@ -911,7 +966,8 @@ class PetWindow(QWidget):
             bitmap = solid_bitmap(bytes(canvas), width, height)
             self.setMask(bitmap)
             self._mask_key = key
-            self.mask_stats = self._mask_stats(bitmap)
+            self.mask_stats = self._mask_stats(
+                bitmap, "bubble" if (bubble is not None and not bubble.isEmpty()) else "window")
             return
         rect = self.sprite_rect()
         # 气泡矩形也要进 key：气泡一变（出现/消失/换行导致高度变化）掩膜必须重建，
@@ -920,15 +976,16 @@ class PetWindow(QWidget):
         if bubble is not None and not bubble.isEmpty():
             bubble_key = (int(bubble.left()), int(bubble.top()),
                           int(bubble.width()), int(bubble.height()))
-        key = (frame.cacheKey(), self.width(), self.height(), pad, bubble_key,
-               int(rect.left()), int(rect.top()), int(rect.width()), int(rect.height()))
+        key = (tuple(layer.cacheKey() for layer in layers), self.width(), self.height(),
+               pad, bubble_key, int(rect.left()), int(rect.top()),
+               int(rect.width()), int(rect.height()))
         if key == self._mask_key:
             return
 
-        bitmap = self._build_input_bitmap(frame, rect, bubble)
+        bitmap = self._build_input_bitmap(layers, rect, bubble)
         self.setMask(bitmap)
         self._mask_key = key
-        self.mask_stats = self._mask_stats(bitmap)
+        self.mask_stats = self._mask_stats(bitmap, "frames")
         self._settle_initial_placement()
 
     def _settle_initial_placement(self):
@@ -968,7 +1025,7 @@ class PetWindow(QWidget):
         """
         self._settle_deadline = None
 
-    def _mask_stats(self, bitmap):
+    def _mask_stats(self, bitmap, source="frames"):
         """占用区域的量化指标。
 
         用**掩膜区域的几何面积**而不是去数位图的灰阶：`QBitmap.toImage()` 的灰阶与
@@ -978,16 +1035,23 @@ class PetWindow(QWidget):
             cover = 掩膜包围矩形面积 / 窗口面积
 
         接近 1.0 说明整个矩形都在挡人；0.2~0.3 说明只占了角色本体那一片。
+
+        `source` 说明这张掩膜是按什么建的：`"frames"`（角色，含垫层）、`"bubble"`
+        （只剩气泡）、`"window"`（整窗）。加它是因为**面积只在真平台上量得到** ——
+        offscreen 平台不支持 `setMask`（会打印 "does not support setting window masks"），
+        于是 cover 恒为 0.0；"掩膜有没有塌成只剩气泡"这件事只能靠 `source` 在自检里判，
+        否则那次 0.3 秒丢画面永远测不出来。
         """
         region = self.mask()
         if region is None or region.isEmpty():
-            return {"cover": 0.0, "rect": None}
+            return {"cover": 0.0, "rect": None, "source": source}
         rect = region.boundingRect()
         total = max(1, self.width() * self.height())
         return {
             "cover": round(rect.width() * rect.height() / float(total), 3),
             "rect": [rect.left(), rect.top(), rect.width(), rect.height()],
             "window": [self.width(), self.height()],
+            "source": source,
         }
 
     def paintEvent(self, _event):
@@ -998,31 +1062,12 @@ class PetWindow(QWidget):
         # 交叉淡化：垫层（上一段的最后一帧）先满不透明地铺上，新段再叠上去淡入。
         # 只让新段淡入而不铺垫层，中间会出现两头都透明的空档——那正是"切换动作时
         # 短暂消失"的成因。
-        outgoing = self.animator.outgoing_frame()
-        alpha = self.animator.fade_alpha()
-        ready = self.animator.playing is not None and self.animator.playing.ready
-        frame = self.animator.current_frame()
-        # **垫层要盖住两种时刻**：①新段正在淡入（`alpha < 1`）；②**新段这一帧还没有**
-        # （`frame is None`）。
         #
-        # 第②种原先漏了：条件里要求 `ready`，而"新段还在加载/那一帧还没被生产出来"
-        # 恰恰 **不 ready** —— 于是垫层被跳过，接着又画了个 `None`，屏幕上**什么都没有**，
-        # 就是用户看到的"动作变化时消失一瞬"。
-        #
-        # 实测（tools/probe_switch_blank.py，连续切换动画 8 次 / 320 帧）：
-        #     修流式解码内存之前：会看不见的帧 0
-        #     之后              ：会看不见的帧 35
-        # 降内存后"切回一个播过的动画"时，那一帧可能还没被生产出来（缓冲被淘汰过），
-        # 于是 `frame is None` 变得常见，把这个漏掉的分支暴露了出来。
-        #
-        # 注意这一条**只**在"本来会什么都画不出来"时才改变行为：`frame` 有值且不需要
-        # 淡化时，走的分支与原来完全一样（见上面的比对实验）。
-        if outgoing is not None and (frame is None or (ready and alpha < 1.0)):
-            painter.setOpacity(1.0)
-            self._draw_sprite(painter, outgoing)
-
-        painter.setOpacity(alpha)
-        self._draw_sprite(painter, frame)
+        # 画哪几层由 `sprite_layers()` 决定（判定条件与全部历史注释都在那里），
+        # **输入掩膜用的是同一份判断** —— 两处各写一遍就会漂移，已经因此丢过一次画面。
+        for layer, opacity in self.sprite_layers():
+            painter.setOpacity(opacity)
+            self._draw_sprite(painter, layer)
         painter.setOpacity(1.0)
 
         if self.bubble or self.bubble_image is not None:

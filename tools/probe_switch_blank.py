@@ -20,6 +20,20 @@
 这个探针就找这两种时刻：连续切换动画，逐帧采样，统计"会看不见"的帧数与它们
 出现在切换之后的第几帧。
 
+**还要看掩膜。** `setMask` 不只裁输入，它**同时裁绘制** —— 掩膜里没有的区域连画都
+画不出来。所以"看不见"还有第三种来源，而且它曾被这个探针漏掉：
+
+    C. 画面**画了**（垫层铺上了），但**掩膜把角色那部分裁掉了**。
+       `_apply_input_mask` 早先按"没有 current_frame 就什么都不画"把掩膜塌成
+       "只剩气泡"（实测 cover 0.27 -> 0.047，rect 变成气泡的 [110, 30, 100, 32]，
+       持续约 0.3 秒）。第一版的探针只读 animator，于是判定"修好了"，
+       而屏幕上角色照样消失 —— 因为垫层被掩膜裁掉了。
+
+    所以这里每次采样也调一次 `_apply_input_mask()`（生产路径由 `_repaint` 调），
+    并核对"只要这一帧还会画角色，掩膜就必须是 frames 来源"。
+    **面积数值在 offscreen 平台上量不到**（不支持 setMask，cover 恒为 0.0），
+    所以判据用 `mask_stats["source"]`，它不依赖平台。
+
     python tools/probe_switch_blank.py
 """
 
@@ -87,6 +101,7 @@ def main():
     print("  参与切换的动画: %s" % "、".join(names[:4]))
 
     blank = []
+    collapsed = []
     switches = 0
     for round_index in range(8):
         target = names[round_index % len(names)]
@@ -99,6 +114,13 @@ def main():
             if not visible:
                 blank.append((target, offset, name, ready, has_frame,
                               round(alpha, 2), has_underlay))
+            # 掩膜核对：生产路径里 `_repaint` 每帧都会调它
+            window._apply_input_mask()
+            layers = window.sprite_layers()
+            stats = getattr(window, "mask_stats", None) or {}
+            if layers and stats.get("source") != "frames":
+                collapsed.append((target, offset, len(layers), stats.get("source"),
+                                  stats.get("cover"), stats.get("rect")))
             time.sleep(1.0 / 60.0)
 
     print()
@@ -127,10 +149,24 @@ def main():
         if transparent:
             print("    -> 新段刚切换、alpha 从 0 起，而垫层为空")
 
+    print()
+    print("  掩膜核对：只要这一帧还会画角色，掩膜就必须由 frames 建成")
+    print("  " + "-" * 74)
+    if collapsed:
+        print("  **掩膜塌掉了 %d 帧**：角色那部分会被 setMask 裁掉 —— 屏幕上就是"
+              "「消失一瞬」，哪怕 paintEvent 已经把垫层铺上了。" % len(collapsed))
+        for row in collapsed[:10]:
+            print("    切到 %-14s 第 %-3d 帧  层数=%d source=%s cover=%s rect=%s"
+                  % (row[0][:14], row[1], row[2], row[3], row[4], row[5]))
+        if len(collapsed) > 10:
+            print("    …… 另有 %d 帧" % (len(collapsed) - 10))
+    else:
+        print("  OK   掩膜始终跟着「画出来的东西」走，没有塌成只剩气泡")
+
     window.close()
     store.close()
     print()
-    return 1 if blank else 0
+    return 1 if (blank or collapsed) else 0
 
 
 if __name__ == "__main__":

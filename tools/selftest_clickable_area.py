@@ -6,8 +6,19 @@
 `dragging` 起不来，拖拽完全无效（而掩膜每次重建又会把窗口搬回出生点）。
 
 所以要验两件事，方向相反：
-  1. 角色包围盒**内部**的采样点 -> 必须在掩膜里（可点、可拖）；
+  1. **画出来的每一层**（角色本体，含交叉淡化的垫层）-> 必须**完整地**在掩膜里；
+     只要有一像素被掩膜裁掉，屏幕上那块就画不出来；
   2. 窗口四角那片**全透明**区域   -> 必须不在掩膜里（点击穿透到下层）。
+
+第 1 条原来是"掩膜包围盒的**中心**必须可点"。那个判据隐含了"掩膜只按一帧算"这个前提，
+而交叉淡入时画的是**两层**（垫层 + 新段），两层并集的包围盒中心完全可能落在两个姿势之间
+的空隙里 —— 于是修复"切换动作时角色消失 0.3 秒"（掩膜改成按 `sprite_layers()` 取并集）
+之后，这个判据会**时而失败时而通过**（同一份代码实测出现过 67/90 与 89/89）。
+判据必须与实现一致，所以改成直接量"有没有被裁掉"：
+
+    实测（tools 里同一套缩放与阈值，见 _verify 的 measure_mask_clip）：
+        并集规则（现在）    裁掉 0.0%
+        只看 current_frame  交叉淡入期间裁掉 5~6%；新段那一帧还没有时裁掉 100%
 
 掩膜的位语义容易记反（`Format_Mono` 下黑=置位=可点，且构造时 `mask_invert=True`），
 所以这里不靠推理，直接用 `window.mask()` 这个 Qt 自己给的 QRegion 去判定。
@@ -45,6 +56,61 @@ def inside(region, x, y):
     return region.contains(QPoint(int(x), int(y)))
 
 
+def layer_pixels(window, frame):
+    """某一层**实际画出来的**不透明像素（与 `_build_input_bitmap` 同一套缩放与阈值）。
+
+    numpy 只在函数里 import：本项目的 `tools/check_without_numpy.py` 要求在**没有
+    numpy** 的环境下也能跑起来，顶层 import 会把那条自检一起打断。
+    """
+    import numpy as np
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QImage
+
+    rect = window.sprite_rect()
+    margin = 2
+    box_w = max(1, int(round(rect.width())) + margin * 2)
+    box_h = max(1, int(round(rect.height())))
+    image = frame.toImage().convertToFormat(QImage.Format_ARGB32)
+    if image.width() != box_w or image.height() != box_h:
+        image = image.scaled(box_w, box_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    solid = np.frombuffer(window._threshold_bytes(image), dtype=np.uint8)
+    return (solid.reshape(box_h, box_w) > 0,
+            int(round(rect.left())) - margin, int(round(rect.top())), box_w, box_h)
+
+
+def painted_pixels(window, frames):
+    """`paintEvent` 这一帧画出来的全部像素（各层取并集）。"""
+    import numpy as np
+
+    height, width = window.height(), window.width()
+    canvas = np.zeros((height, width), dtype=bool)
+    for frame in frames:
+        solid, left, top, box_w, box_h = layer_pixels(window, frame)
+        sy0, sy1 = max(0, top), min(height, top + box_h)
+        sx0, sx1 = max(0, left), min(width, left + box_w)
+        if sy1 <= sy0 or sx1 <= sx0:
+            continue
+        canvas[sy0:sy1, sx0:sx1] |= solid[sy0 - top:sy1 - top, sx0 - left:sx1 - left]
+    return canvas
+
+
+def masked_pixels(window):
+    """掩膜真正覆盖的像素（把 QRegion 的矩形栅格化）。"""
+    import numpy as np
+
+    height, width = window.height(), window.width()
+    canvas = np.zeros((height, width), dtype=bool)
+    region = window.mask()
+    if region is None or region.isEmpty():
+        return canvas
+    for rect in region.rects():
+        x0, y0 = max(0, rect.left()), max(0, rect.top())
+        x1, y1 = min(width, rect.right() + 1), min(height, rect.bottom() + 1)
+        if x1 > x0 and y1 > y0:
+            canvas[y0:y1, x0:x1] = True
+    return canvas
+
+
 def main():
     app = build_app([])
     config = load()
@@ -53,16 +119,28 @@ def main():
     window = PetWindow(entries[0], store)
     window.show()
 
-    # 跑一会儿，让若干动画帧都算过掩膜（角色宽度在不同动画里差别很大）
+    # 跑一会儿，让若干动画帧都算过掩膜（角色宽度在不同动画里差别很大）。
+    # 采样时就把"被裁掉多少"算好：掩膜每帧都会重建，事后拿旧的 QRegion 去对没有意义。
+    #
+    # **必须自己调 `_apply_input_mask()`**：生产路径里 `_repaint` 每帧都调
+    # （`_apply_input_mask()` → `update()`），而这个自检没有跑 main 的定时器，
+    # 不调的话掩膜会停在上一帧 —— 量到的就是"掩膜落后一帧"，不是掩膜的规则有问题。
     deadline = time.monotonic() + 6.0
     samples = []
     while time.monotonic() < deadline:
         app.processEvents()
+        window._apply_input_mask()
         region = window.mask()
         stats = getattr(window, "mask_stats", None) or {}
         rect = stats.get("rect")
         if region and not region.isEmpty() and rect:
-            samples.append((region, rect, window.width(), window.height()))
+            frames = [frame for frame, _opacity in window.sprite_layers()]
+            need = painted_pixels(window, frames) if frames else None
+            cut = painted = 0
+            if need is not None and need.any():
+                painted = int(need.sum())
+                cut = int((need & ~masked_pixels(window)).sum())
+            samples.append((region, rect, window.width(), window.height(), cut, painted))
         time.sleep(0.05)
 
     print()
@@ -71,27 +149,29 @@ def main():
         print("  **一个都没有** —— 掩膜始终为空，那整个窗口都不可点（这本身就是 bug）")
         return 1
 
-    # --- 1. 角色包围盒内部必须可点 ---
-    ok_inside = 0
-    bad_inside = []
-    for region, rect, width, height in samples:
-        cx = rect[0] + rect[2] / 2.0
-        cy = rect[1] + rect[3] / 2.0
-        if inside(region, cx, cy):
-            ok_inside += 1
-        else:
-            bad_inside.append((cx, cy, rect))
+    # --- 1. 画出来的每一层都必须完整地在掩膜里（被裁掉就等于屏幕上画不出来）---
+    clipped_total = 0
+    painted_total = 0
+    worst = (0.0, "")
+    for region, rect, width, height, cut, painted in samples:
+        clipped_total += cut
+        painted_total += painted
+        if painted:
+            fraction = cut / float(painted)
+            if fraction > worst[0]:
+                worst = (fraction, "%.1f%% (%d/%d)" % (fraction * 100.0, cut, painted))
 
     print()
-    print("  1) 角色包围盒**中心**是否可点")
-    check("所有采样里角色中心都在掩膜内",
-          ok_inside == len(samples),
-          "%d/%d 可点%s" % (ok_inside, len(samples),
-                          ("；反例 %s" % bad_inside[:2]) if bad_inside else ""))
+    print("  1) 画出来的角色（含交叉淡化的垫层）是否被掩膜裁掉")
+    check("所有采样里画出来的像素都不被掩膜裁掉",
+          clipped_total == 0,
+          "合计裁掉 %d / %d 像素%s"
+          % (clipped_total, painted_total,
+             ("；最坏一帧 %s" % worst[1]) if clipped_total else ""))
 
     # --- 2. 窗口四角（全透明留白）必须穿透 ---
     corner_hits = []
-    for region, rect, width, height in samples:
+    for region, rect, width, height, _cut, _painted in samples:
         corners = [(2, 2), (width - 3, 2), (2, height - 3), (width - 3, height - 3)]
         for x, y in corners:
             # 只要该角远离角色包围盒，就该在掩膜之外
@@ -155,9 +235,9 @@ def main():
 
     print()
     if FAILED:
-        print("  结论：%d 项不通过 —— 角色的可点区域有问题。" % len(FAILED))
+        print("  结论：%d 项不通过 —— 角色的可点/可见区域有问题。" % len(FAILED))
     else:
-        print("  结论：全部通过 —— 角色中心可点、透明处穿透、拖动生效。")
+        print("  结论：全部通过 —— 角色画出来的部分都在掩膜内、透明处穿透、拖动生效。")
     return 1 if FAILED else 0
 
 
